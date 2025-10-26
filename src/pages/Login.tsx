@@ -27,7 +27,7 @@ const Login = () => {
       callback: async (response) => {
         try {
           // Send token to your backend for verification
-          const res = await fetch('${API_URL}/api/auth/google', {
+          const res = await fetch(`${API_URL}/api/auth/google`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: response.access_token }),
