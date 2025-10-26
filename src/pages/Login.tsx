@@ -19,13 +19,15 @@ const Login = () => {
 
   const handleGoogleLogin = () => {
     /* global google */
+    const API_URL = import.meta.env.VITE_API_URL;
+
     const client = google.accounts.oauth2.initTokenClient({
       client_id: '1087597755219-uupeh9boiuhah10kde210nebgocuu0od.apps.googleusercontent.com',
       scope: 'email profile',
       callback: async (response) => {
         try {
           // Send token to your backend for verification
-          const res = await fetch('http://localhost:5000/api/auth/google', {
+          const res = await fetch('${API_URL}/api/auth/google', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: response.access_token }),
