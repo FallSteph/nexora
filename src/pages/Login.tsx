@@ -61,7 +61,14 @@ const Login = () => {
 
     setLoading(true);
     try {
-      await login(email, password); // backend call inside context
+      // Get reCAPTCHA token
+      const token = await recaptchaRef.current?.getValue();
+
+      await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, recaptchaToken: token }),
+      });
       toast.success('Welcome back!');
       navigate('/dashboard');
     } catch (err: any) {
