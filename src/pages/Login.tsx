@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Mail, Lock, Sparkles, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 declare const google: any;
 
@@ -14,8 +15,10 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [captchaVerified, setCaptchaVerified] = useState(false);
   const navigate = useNavigate();
   const { login, googleLogin } = useAuth();
+  const recaptchaRef = useRef<ReCAPTCHA | null>(null);
 
   const handleGoogleLogin = () => {
     if (!(window as any).google || !(window as any).google.accounts) return;
@@ -50,6 +53,12 @@ const Login = () => {
   // Manual login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!captchaVerified) {
+      toast.error('Please verify that you are not a robot.');
+      return;
+    }
+
     setLoading(true);
     try {
       await login(email, password); // backend call inside context
@@ -123,6 +132,15 @@ const togglePasswordVisibility = () => {
                   )}
                 </button>
               </div>
+            </div>
+
+            {/* ✅ reCAPTCHA */}
+            <div className="flex justify-center">
+              <ReCAPTCHA
+                ref={recaptchaRef}
+                sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
+                onChange={() => setCaptchaVerified(true)}
+              />
             </div>
 
             <div className="flex justify-between text-sm">
