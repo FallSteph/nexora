@@ -17,21 +17,30 @@ const Signup = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { signup, googleSignup } = useAuth();
+  const { googleSignup } = useAuth();
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await signup(email, password, firstName, lastName);
-      toast.success('Account created successfully! Welcome to Nexora 🎉');
-      navigate('/dashboard');
-    } catch (error) {
-      toast.error('Failed to create account. Please try again.');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, firstName, lastName }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || "Failed to create account");
+
+      toast.success("Account created successfully! 🎉");
+      navigate("/login"); // Go to login page after signup
+    } catch (error: any) {
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleGoogleSignup = () => {
     if (!(window as any).google || !(window as any).google.accounts) return;

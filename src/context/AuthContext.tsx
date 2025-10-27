@@ -68,20 +68,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const signup = async (email: string, password: string, firstName: string, lastName: string) => {
-    const exists = mockUsers.find(u => u.email === email);
-    if (exists) throw new Error('User already exists');
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, firstName, lastName }),
+    });
+    const data = await res.json();
 
-    const newUser: User = {
-      id: Date.now().toString(),
-      email,
-      firstName,
-      lastName,
-      role: 'user',
-      authProvider: 'local',
-    };
-    setMockUsers(prev => [...prev, newUser]);
-    setUser(newUser);
-    localStorage.setItem('user', JSON.stringify(newUser));
+    if (!res.ok) throw new Error(data.message || "Signup failed");
+
+    setUser(data.user);
+    localStorage.setItem("user", JSON.stringify(data.user));
   };
 
   // ✅ Google login (checks existing accounts)
