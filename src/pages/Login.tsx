@@ -52,31 +52,38 @@ const Login = () => {
 
   // Manual login
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    if (!captchaVerified) {
-      toast.error('Please verify that you are not a robot.');
+  if (!captchaVerified) {
+    toast.error("Please verify that you are not a robot.");
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const recaptchaToken = recaptchaRef.current?.getValue();
+    if (!recaptchaToken) {
+      toast.error("Please complete the reCAPTCHA.");
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
-    try {
-      // Get reCAPTCHA token
-      const token = await recaptchaRef.current?.getValue();
+    await login(email, password, recaptchaToken);
+    toast.success("Welcome back! 🚀");
 
-      await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, recaptchaToken: token }),
-      });
-      toast.success('Welcome back!');
-      navigate('/dashboard');
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // ✅ Ensure redirect happens right after successful login
+    navigate("/dashboard");
+
+    // Reset reCAPTCHA after successful login
+    recaptchaRef.current?.reset();
+    setCaptchaVerified(false);
+  } catch (err: any) {
+    toast.error(err.message || "Login failed");
+  } finally {
+    setLoading(false);
+  }
+};
+
 
 const togglePasswordVisibility = () => {
   setShowPassword(!showPassword);
