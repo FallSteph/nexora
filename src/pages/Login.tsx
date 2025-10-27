@@ -18,38 +18,28 @@ const Login = () => {
   const { login, googleLogin } = useAuth();
 
   const handleGoogleLogin = () => {
-    /* global google */
-    const API_URL = import.meta.env.VITE_API_URL;
+    if (!(window as any).google || !(window as any).google.accounts) return;
 
     const client = google.accounts.oauth2.initTokenClient({
-      client_id: '1087597755219-uupeh9boiuhah10kde210nebgocuu0od.apps.googleusercontent.com',
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
       scope: 'email profile',
-      callback: async (response) => {
+      callback: async (response: any) => {
         try {
-          // Send token to your backend for verification
-          const res = await fetch(`${API_URL}/api/auth/google`, {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: response.access_token }),
           });
-          
-          if (res.ok) {
-            const data = await res.json();
 
-            //  Save user to localStorage or context
-            localStorage.setItem('user', JSON.stringify(data.user));
+          if (!res.ok) throw new Error('Failed to log in with Google');
 
-            // ✅ Also update AuthContext
-            googleLogin(data.user);
+          const data = await res.json(); // { user }
 
-            toast.success('Welcome back! 🚀');
-            navigate('/dashboard');
-          } else {
-            toast.error('Failed to log in with Google');
-          }
-        } catch (err) {
-          console.error(err);
-          toast.error('An error occurred');
+          googleLogin(data.user);
+          toast.success('Welcome back! 🚀');
+          navigate('/dashboard');
+        } catch (err: any) {
+          toast.error(err.message || 'An error occurred');
         }
       },
     });
@@ -57,19 +47,19 @@ const Login = () => {
     client.requestAccessToken();
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  try {
-    await login(email, password);
-    toast.success('Welcome back to Nexora! 🚀');
-    navigate('/dashboard');
-  } catch (error) {
-    toast.error('Invalid credentials. Try admin@nexora.io / admin123');
-  } finally {
-    setLoading(false);
-  }
-};
+    const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await login(email, password);
+      toast.success('Welcome back to Nexora! 🚀');
+      navigate('/dashboard');
+    } catch (error) {
+      toast.error('Invalid credentials. Try admin@nexora.io / admin123');
+    } finally {
+      setLoading(false);
+    }
+  };
 
 const togglePasswordVisibility = () => {
   setShowPassword(!showPassword);

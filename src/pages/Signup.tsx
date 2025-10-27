@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Mail, Lock, User, Sparkles, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
+declare const google: any;
+
 const Signup = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -15,7 +17,7 @@ const Signup = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { signup } = useAuth();
+  const { signup, googleSignup } = useAuth();
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +34,35 @@ const Signup = () => {
   };
 
   const handleGoogleSignup = () => {
-    toast.info('Google OAuth coming soon!');
+    if (!(window as any).google || !(window as any).google.accounts) return;
+
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      scope: 'email profile',
+      callback: async (response: any) => {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: response.access_token }),
+          });
+
+          if (!res.ok) throw new Error('Failed to sign up with Google');
+
+          const data = await res.json(); // { user }
+
+          googleSignup(data.user); // ✅ call googleSignup
+          toast.success('Account created! 🎉');
+          navigate('/dashboard');
+        } catch (err: any) {
+          toast.error(err.message || 'An error occurred');
+        }
+      },
+    });
+
+    client.requestAccessToken();
   };
+
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);

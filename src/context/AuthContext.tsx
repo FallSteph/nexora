@@ -7,6 +7,7 @@ export interface User {
   lastName: string;
   role: 'admin' | 'user';
   avatar?: string;
+  authProvider?: 'local' | 'google';
 }
 
 interface AuthContextType {
@@ -16,19 +17,18 @@ interface AuthContextType {
   logout: () => void;
   updateProfile: (updates: Partial<User>) => void;
   googleLogin: (googleUser: User) => void;
+  googleSignup: (googleUser: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 };
 
-// Mock users - moved inside component to make it reactive
+// Mock users
 const createMockUsers = (): User[] => [
   {
     id: '1',
@@ -36,6 +36,7 @@ const createMockUsers = (): User[] => [
     firstName: 'Admin',
     lastName: 'User',
     role: 'admin',
+    authProvider: 'local',
   },
   {
     id: '2',
@@ -43,6 +44,7 @@ const createMockUsers = (): User[] => [
     firstName: 'Normal',
     lastName: 'User',
     role: 'user',
+    authProvider: 'local',
   },
 ];
 
@@ -51,61 +53,83 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [mockUsers, setMockUsers] = useState<User[]>(createMockUsers);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) setUser(JSON.parse(storedUser));
   }, []);
 
-
   const login = async (email: string, password: string) => {
-    // Find user in the reactive mockUsers array
-    const foundUser = mockUsers.find((u) => u.email === email);
+    const foundUser = mockUsers.find(u => u.email === email && u.authProvider === 'local');
     if (foundUser) {
       setUser(foundUser);
+      localStorage.setItem('user', JSON.stringify(foundUser));
     } else {
       throw new Error('Invalid credentials');
     }
   };
 
-  // ✅ Google Login Handler
-  const googleLogin = (googleUser: User) => {
-    setUser(googleUser);
-    localStorage.setItem("user", JSON.stringify(googleUser));
-  };
-
-
   const signup = async (email: string, password: string, firstName: string, lastName: string) => {
+    const exists = mockUsers.find(u => u.email === email);
+    if (exists) throw new Error('User already exists');
+
     const newUser: User = {
       id: Date.now().toString(),
       email,
       firstName,
       lastName,
       role: 'user',
+      authProvider: 'local',
     };
-    // Update the reactive mockUsers array
     setMockUsers(prev => [...prev, newUser]);
     setUser(newUser);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  };
+
+  // ✅ Google login (checks existing accounts)
+  const googleLogin = (googleUser: User) => {
+    const existingUser = mockUsers.find(u => u.email === googleUser.email && u.authProvider === 'google');
+    if (!existingUser) {
+      throw new Error('No account found. Please sign up first.');
+    }
+    setUser(existingUser);
+    localStorage.setItem('user', JSON.stringify(existingUser));
+  };
+
+  // ✅ Google signup (creates new account if not exists)
+  const googleSignup = (googleUser: User) => {
+    const exists = mockUsers.find(u => u.email === googleUser.email);
+    if (exists) throw new Error('Account already exists. Please log in.');
+
+    const newUser: User = {
+      ...googleUser,
+      id: Date.now().toString(),
+      role: 'user',
+      authProvider: 'google',
+    };
+
+    setMockUsers(prev => [...prev, newUser]);
+    setUser(newUser);
+    localStorage.setItem('user', JSON.stringify(newUser));
   };
 
   const logout = () => {
     setUser(null);
+    localStorage.removeItem('user');
   };
 
   const updateProfile = (updates: Partial<User>) => {
-    if (user) {
-      const updatedUser = { ...user, ...updates };
-      setUser(updatedUser);
-      
-      // Also update the user in mockUsers array to persist changes
-      setMockUsers(prev => 
-        prev.map(u => u.id === user.id ? updatedUser : u)
-      );
-    }
+    if (!user) return;
+
+    const updatedUser = { ...user, ...updates };
+    setUser(updatedUser);
+
+    setMockUsers(prev => prev.map(u => (u.id === user.id ? updatedUser : u)));
+    localStorage.setItem('user', JSON.stringify(updatedUser));
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, updateProfile, googleLogin }}>
+    <AuthContext.Provider
+      value={{ user, login, signup, logout, updateProfile, googleLogin, googleSignup }}
+    >
       {children}
     </AuthContext.Provider>
   );
