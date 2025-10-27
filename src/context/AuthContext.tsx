@@ -88,12 +88,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // ✅ Google login (checks existing accounts)
   const googleLogin = (googleUser: User) => {
-    const existingUser = mockUsers.find(u => u.email === googleUser.email && u.authProvider === 'google');
-    if (!existingUser) {
-      throw new Error('No account found. Please sign up first.');
-    }
-    setUser(existingUser);
-    localStorage.setItem('user', JSON.stringify(existingUser));
+    setUser(googleUser);
+    localStorage.setItem('user', JSON.stringify(googleUser));
   };
 
   // ✅ Google signup (creates new account if not exists)
