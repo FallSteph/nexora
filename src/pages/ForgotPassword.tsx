@@ -18,19 +18,20 @@ const ForgotPassword = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const API_URL = import.meta.env.VITE_API_URL;
+
+  // Step 1: Send code
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const API_URL = import.meta.env.VITE_API_URL;
     try {
-      const res = await fetch('`${API_URL}/api/auth/send-code', {
+      const res = await fetch(`${API_URL}/api/auth/send-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
-
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         toast.success('Verification code sent to your email!');
         setStep('code');
       } else {
@@ -44,21 +45,32 @@ const ForgotPassword = () => {
     }
   };
 
-
+  // Step 2: Verify code
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      if (code === '123456') {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
         toast.success('Code verified successfully!');
         setStep('password');
       } else {
-        toast.error('Invalid code. Try 123456 for testing.');
+        toast.error(data.message || 'Invalid code');
       }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to verify code. Please try again.');
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
+  // Step 3: Reset password
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
@@ -66,19 +78,33 @@ const ForgotPassword = () => {
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      toast.success('Password changed successfully! You can now login.');
+    try {
+      const res = await fetch(`${API_URL}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, newPassword }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success('Password changed successfully! You can now login.');
+        setStep('email');
+        setEmail('');
+        setCode('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        toast.error(data.message || 'Failed to reset password');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to reset password. Please try again.');
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
-  const toggleNewPasswordVisibility = () => {
-    setShowNewPassword(!showNewPassword);
-  };
-
-  const toggleConfirmPasswordVisibility = () => {
-    setShowConfirmPassword(!showConfirmPassword);
-  };
+  const toggleNewPasswordVisibility = () => setShowNewPassword(!showNewPassword);
+  const toggleConfirmPasswordVisibility = () => setShowConfirmPassword(!showConfirmPassword);
 
   return (
     <div className="min-h-screen flex items-center justify-center mesh-gradient p-4">
@@ -97,7 +123,7 @@ const ForgotPassword = () => {
             </p>
           </div>
 
-          {/* Step 1: Email */}
+          {/* Step Forms */}
           {step === 'email' && (
             <form onSubmit={handleSendCode} className="space-y-3">
               <div className="space-y-2">
@@ -115,18 +141,12 @@ const ForgotPassword = () => {
                   />
                 </div>
               </div>
-
-              <Button
-                type="submit"
-                className="w-full gradient-primary hover:opacity-90 transition-opacity"
-                disabled={loading}
-              >
+              <Button type="submit" className="w-full gradient-primary" disabled={loading}>
                 {loading ? 'Sending...' : 'Send Code'}
               </Button>
             </form>
           )}
 
-          {/* Step 2: Verification Code */}
           {step === 'code' && (
             <form onSubmit={handleVerifyCode} className="space-y-3">
               <div className="space-y-2">
@@ -144,22 +164,13 @@ const ForgotPassword = () => {
                     required
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  💡 Test code: <span className="text-primary font-mono">123456</span>
-                </p>
               </div>
-
-              <Button
-                type="submit"
-                className="w-full gradient-primary hover:opacity-90 transition-opacity"
-                disabled={loading}
-              >
+              <Button type="submit" className="w-full gradient-primary" disabled={loading}>
                 {loading ? 'Verifying...' : 'Verify Code'}
               </Button>
             </form>
           )}
 
-          {/* Step 3: New Password */}
           {step === 'password' && (
             <form onSubmit={handleResetPassword} className="space-y-3">
               <div className="space-y-2">
@@ -181,11 +192,7 @@ const ForgotPassword = () => {
                     onClick={toggleNewPasswordVisibility}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {showNewPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -209,27 +216,19 @@ const ForgotPassword = () => {
                     onClick={toggleConfirmPasswordVisibility}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {showConfirmPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
-              <Button
-                type="submit"
-                className="w-full gradient-primary hover:opacity-90 transition-opacity"
-                disabled={loading}
-              >
+              <Button type="submit" className="w-full gradient-primary" disabled={loading}>
                 {loading ? 'Changing...' : 'Change Password'}
               </Button>
             </form>
           )}
 
           {/* Back to Login */}
-          <Link to="/login" className="block">
+          <Link to="/login" className="block mt-2">
             <Button variant="ghost" className="w-full hover:bg-transparent hover:text-primary transition-colors">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Login
