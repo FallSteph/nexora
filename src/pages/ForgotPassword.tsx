@@ -20,84 +20,84 @@ const ForgotPassword = () => {
 
   const API_URL = import.meta.env.VITE_API_URL;
 
-  // Step 1: Send code
+  // ---------------- Step 1: Send Verification Code ----------------
   const handleSendCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       const res = await fetch(`${API_URL}/api/auth/send-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
+
       const data = await res.json();
-      if (res.ok && data.success) {
-        toast.success('Verification code sent to your email!');
-        setStep('code');
-      } else {
-        toast.error(data.message || 'Failed to send code');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to send code. Please try again.');
+
+      if (!res.ok) throw new Error(data.message || 'Failed to send code');
+
+      toast.success('Verification code sent to your email!');
+      setStep('code');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send code');
     } finally {
       setLoading(false);
     }
   };
 
-  // Step 2: Verify code
+  // ---------------- Step 2: Verify Code ----------------
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       const res = await fetch(`${API_URL}/api/auth/verify-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, code }),
       });
+
       const data = await res.json();
-      if (res.ok && data.success) {
-        toast.success('Code verified successfully!');
-        setStep('password');
-      } else {
-        toast.error(data.message || 'Invalid code');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to verify code. Please try again.');
+
+      if (!res.ok) throw new Error(data.message || 'Invalid code');
+
+      toast.success('Code verified successfully!');
+      setStep('password');
+    } catch (err: any) {
+      toast.error(err.message || 'Invalid code');
     } finally {
       setLoading(false);
     }
   };
 
-  // Step 3: Reset password
+  // ---------------- Step 3: Reset Password ----------------
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (newPassword !== confirmPassword) {
       toast.error('Passwords do not match!');
       return;
     }
+
     setLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, newPassword }),
+        body: JSON.stringify({ email, password: newPassword }),
       });
+
       const data = await res.json();
-      if (res.ok && data.success) {
-        toast.success('Password changed successfully! You can now login.');
-        setStep('email');
-        setEmail('');
-        setCode('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        toast.error(data.message || 'Failed to reset password');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to reset password. Please try again.');
+      if (!res.ok) throw new Error(data.message || 'Failed to reset password');
+
+      toast.success('Password changed successfully! You can now login.');
+      setStep('email');
+      setEmail('');
+      setCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reset password');
     } finally {
       setLoading(false);
     }
@@ -123,7 +123,7 @@ const ForgotPassword = () => {
             </p>
           </div>
 
-          {/* Step Forms */}
+          {/* Step 1: Email */}
           {step === 'email' && (
             <form onSubmit={handleSendCode} className="space-y-3">
               <div className="space-y-2">
@@ -141,12 +141,14 @@ const ForgotPassword = () => {
                   />
                 </div>
               </div>
+
               <Button type="submit" className="w-full gradient-primary" disabled={loading}>
                 {loading ? 'Sending...' : 'Send Code'}
               </Button>
             </form>
           )}
 
+          {/* Step 2: Verification Code */}
           {step === 'code' && (
             <form onSubmit={handleVerifyCode} className="space-y-3">
               <div className="space-y-2">
@@ -165,12 +167,14 @@ const ForgotPassword = () => {
                   />
                 </div>
               </div>
+
               <Button type="submit" className="w-full gradient-primary" disabled={loading}>
                 {loading ? 'Verifying...' : 'Verify Code'}
               </Button>
             </form>
           )}
 
+          {/* Step 3: New Password */}
           {step === 'password' && (
             <form onSubmit={handleResetPassword} className="space-y-3">
               <div className="space-y-2">
@@ -228,7 +232,7 @@ const ForgotPassword = () => {
           )}
 
           {/* Back to Login */}
-          <Link to="/login" className="block mt-2">
+          <Link to="/login" className="block">
             <Button variant="ghost" className="w-full hover:bg-transparent hover:text-primary transition-colors">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Login
