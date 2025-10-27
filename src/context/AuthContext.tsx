@@ -58,13 +58,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const login = async (email: string, password: string) => {
-    const foundUser = mockUsers.find(u => u.email === email && u.authProvider === 'local');
-    if (foundUser) {
-      setUser(foundUser);
-      localStorage.setItem('user', JSON.stringify(foundUser));
-    } else {
-      throw new Error('Invalid credentials');
-    }
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || "Invalid credentials");
+
+    setUser(data.user); // now uses backend user
+    localStorage.setItem("user", JSON.stringify(data.user));
   };
 
   const signup = async (email: string, password: string, firstName: string, lastName: string) => {
