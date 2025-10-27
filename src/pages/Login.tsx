@@ -49,18 +49,18 @@ const Login = () => {
 
   // Manual login
   const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  try {
-    await login(email, password); // backend call inside context
-    toast.success('Welcome back!');
-    navigate('/dashboard');
-  } catch (err: any) {
-    toast.error(err.message);
-  } finally {
-    setLoading(false);
-  }
-};
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await login(email, password); // backend call inside context
+      toast.success('Welcome back!');
+      navigate('/dashboard');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
 const togglePasswordVisibility = () => {
   setShowPassword(!showPassword);
