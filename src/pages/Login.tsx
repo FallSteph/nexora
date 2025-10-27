@@ -50,7 +50,6 @@ const Login = () => {
     client.requestAccessToken();
   };
 
-  // Manual login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -60,23 +59,33 @@ const Login = () => {
     }
 
     setLoading(true);
-    try {
-      // Get reCAPTCHA token
-      const token = await recaptchaRef.current?.getValue();
 
-      await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, recaptchaToken: token }),
-      });
+    // Get the reCAPTCHA token
+    const recaptchaToken = recaptchaRef.current?.getValue(); // <-- no await
+
+    if (!recaptchaToken) {
+      toast.error('Please complete the reCAPTCHA.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Call the login function from your AuthContext and pass the token
+      await login(email, password, recaptchaToken);
+
       toast.success('Welcome back!');
       navigate('/dashboard');
+      
+      // Reset reCAPTCHA after successful login
+      recaptchaRef.current?.reset();
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
   };
+
+
 
 const togglePasswordVisibility = () => {
   setShowPassword(!showPassword);

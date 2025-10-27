@@ -12,7 +12,7 @@ export interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, recaptchaToken?: string) => Promise<void>;
   signup: (email: string, password: string, firstName: string, lastName: string) => Promise<void>;
   logout: () => void;
   updateProfile: (updates: Partial<User>) => void;
@@ -57,20 +57,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (storedUser) setUser(JSON.parse(storedUser));
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, recaptchaToken?: string) => {
     const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, recaptchaToken }),
     });
 
     const data = await res.json();
 
     if (!res.ok) throw new Error(data.error || "Invalid credentials");
 
-    setUser(data.user); // now uses backend user
+    setUser(data.user);
     localStorage.setItem("user", JSON.stringify(data.user));
   };
+
 
   const signup = async (email: string, password: string, firstName: string, lastName: string) => {
     const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/signup`, {
