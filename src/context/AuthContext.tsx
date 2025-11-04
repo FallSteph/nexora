@@ -28,6 +28,24 @@ export const useAuth = () => {
   return context;
 };
 
+export const login = async (email: string, password: string, recaptchaToken: string) => {
+  const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, recaptchaToken }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(errorData.error || 'Login failed');
+  }
+
+  const data = await res.json();
+  // store user, token, etc.
+  return data;
+};
+
+
 // Mock users
 const createMockUsers = (): User[] => [
   {

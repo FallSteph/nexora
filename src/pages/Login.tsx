@@ -52,43 +52,42 @@ const Login = () => {
 
   // Manual login
   const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!captchaVerified) {
-    toast.error("Please verify that you are not a robot.");
-    return;
-  }
-
-  setLoading(true);
-  try {
+    // ✅ get real reCAPTCHA token
     const recaptchaToken = recaptchaRef.current?.getValue();
     if (!recaptchaToken) {
-      toast.error("Please complete the reCAPTCHA.");
-      setLoading(false);
+      toast.error('Please verify reCAPTCHA');
       return;
     }
 
-    await login(email, password, recaptchaToken);
-    toast.success("Welcome back! 🚀");
+    setLoading(true);
+    try {
+      // ✅ Send token in the correct field name expected by backend
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, recaptchaToken }),
+      });
 
-    // ✅ Ensure redirect happens right after successful login
-    navigate("/dashboard");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Login failed');
 
-    // Reset reCAPTCHA after successful login
-    recaptchaRef.current?.reset();
-    setCaptchaVerified(false);
-  } catch (err: any) {
-    toast.error(err.message || "Login failed");
-  } finally {
-    setLoading(false);
-  }
-};
+      // ✅ Continue normal login flow
+      await login(email, password, recaptchaToken);
+      toast.success('Welcome back!');
+      navigate('/dashboard');
+    } catch (err: any) {
+      toast.error(err.message || 'Login failed');
+    } finally {
+      setLoading(false);
+      recaptchaRef.current?.reset(); // reset captcha after attempt
+    }
+  };
 
-
-const togglePasswordVisibility = () => {
-  setShowPassword(!showPassword);
-};
-
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center mesh-gradient p-4">
@@ -148,11 +147,11 @@ const togglePasswordVisibility = () => {
               </div>
             </div>
 
-            {/* ✅ reCAPTCHA */}
+            {/* ✅ reCAPTCHA (Single Instance) */}
             <div className="flex justify-center">
               <ReCAPTCHA
-                ref={recaptchaRef}
                 sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
+                ref={recaptchaRef}
                 onChange={() => setCaptchaVerified(true)}
               />
             </div>
