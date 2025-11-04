@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,18 +30,11 @@ interface UserType {
   role: 'admin' | 'user';
 }
 
-const INITIAL_USERS: UserType[] = [
-  { id: '1', firstName: 'Admin', lastName: 'User', email: 'admin@nexora.io', role: 'admin' },
-  { id: '2', firstName: 'Normal', lastName: 'User', email: 'user@nexora.io', role: 'user' },
-  { id: '3', firstName: 'John', lastName: 'Doe', email: 'john@nexora.io', role: 'user' },
-  { id: '4', firstName: 'Jane', lastName: 'Smith', email: 'jane@nexora.io', role: 'user' },
-];
-
 type SortField = 'name' | 'email' | 'role';
 type SortDirection = 'asc' | 'desc';
 
 const Users = () => {
-  const [users, setUsers] = useState<UserType[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<UserType[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -55,17 +48,24 @@ const Users = () => {
     firstName: '',
     lastName: '',
     email: '',
+    password: '',
     role: 'user' as 'admin' | 'user',
   });
 
-  const filteredUsers = users.filter((user) => {
-    const query = searchQuery.toLowerCase();
-    return (
-      user.firstName.toLowerCase().includes(query) ||
-      user.lastName.toLowerCase().includes(query) ||
-      user.email.toLowerCase().includes(query)
-    );
-  });
+const filteredUsers = users.filter((user) => {
+  const query = searchQuery.toLowerCase();
+  const firstName = user.firstName?.toLowerCase() || "";
+  const lastName = user.lastName?.toLowerCase() || "";
+  const email = user.email?.toLowerCase() || "";
+
+  return (
+    firstName.includes(query) ||
+    lastName.includes(query) ||
+    email.includes(query)
+  );
+});
+
+
 
   const sortedUsers = [...filteredUsers].sort((a, b) => {
     let aValue: string;
@@ -107,60 +107,124 @@ const Users = () => {
     setMobileSortOpen(false);
   };
 
-  const handleOpenDialog = (user?: UserType) => {
-    if (user) {
-      setEditingUser(user);
-      setFormData({
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role,
-      });
-    } else {
-      setEditingUser(null);
-      setFormData({ firstName: '', lastName: '', email: '', role: 'user' });
-    }
-    setDialogOpen(true);
-  };
+  const generateRandomPassword = (length = 10) => {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+  let password = "";
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
 
-  const handleSaveUser = () => {
-    if (!formData.firstName || !formData.lastName || !formData.email) {
-      toast.error('All fields are required');
-      return;
+
+ const handleOpenDialog = (user?: UserType) => {
+  if (user) {
+    setEditingUser(user);
+    setFormData({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      password: '', // not shown for editing
+      role: user.role,
+    });
+  } else {
+    setEditingUser(null);
+    setFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      password: generateRandomPassword(), // ✅ auto-generate password
+      role: 'user',
+    });
+  }
+  setDialogOpen(true);
+};
+
+
+ const handleSaveUser = async () => {
+  if (!formData.firstName || !formData.lastName || !formData.email) {
+    toast.error("All fields are required");
+    return;
+  }
+
+  if (!editingUser && !formData.password) {
+    toast.error("Password is required for new users");
+    return;
+  }
+
+  try {
+    const url = `${import.meta.env.VITE_API_URL}/api/users`;
+
+    const res = editingUser
+      ? await fetch(`${url}/${editingUser.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        })
+      : await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData),
+        });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.message || "Failed to save user");
     }
+
+    const savedUser = await res.json();
 
     if (editingUser) {
-      setUsers(
-        users.map((u) =>
-          u.id === editingUser.id ? { ...u, ...formData } : u
-        )
-      );
-      toast.success('User updated successfully! ✨');
+      // Update existing user in state
+      setUsers(users.map((u) => (u.id === editingUser.id ? savedUser : u)));
+      toast.success("User updated successfully! ✨");
     } else {
-      const newUser: UserType = {
-        id: Date.now().toString(),
-        ...formData,
-      };
-      setUsers([...users, newUser]);
-      toast.success('User added successfully! 🎉');
+      // Add newly created user
+      setUsers([...users, savedUser]);
+      toast.success("User added successfully! 🎉");
     }
 
     setDialogOpen(false);
-  };
+  } catch (error) {
+    console.error("Error saving user:", error);
+    toast.error(error.message || "Failed to save user");
+  }
+};
+
+
 
   const handleDeleteClick = (user: UserType) => {
     setUserToDelete(user);
     setDeleteDialogOpen(true);
   };
 
-  const handleConfirmDelete = () => {
-    if (userToDelete) {
-      setUsers(users.filter((u) => u.id !== userToDelete.id));
-      toast.success(`User ${userToDelete.firstName} ${userToDelete.lastName} has been deleted`);
-      setDeleteDialogOpen(false);
-      setUserToDelete(null);
+const handleConfirmDelete = async () => {
+  if (!userToDelete) return;
+
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/${userToDelete.id}`, {
+      method: "DELETE",
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.message || "Failed to delete user");
     }
-  };
+
+    // ✅ Remove user from local state after successful deletion
+    setUsers(users.filter((u) => u.id !== userToDelete.id));
+
+    toast.success(`User ${userToDelete.firstName} ${userToDelete.lastName} has been deleted`);
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    toast.error(error.message || "Failed to delete user");
+  } finally {
+    setDeleteDialogOpen(false);
+    setUserToDelete(null);
+  }
+};
+
 
   const handleCancelDelete = () => {
     setDeleteDialogOpen(false);
@@ -182,6 +246,31 @@ const Users = () => {
       <ArrowUpDown className="w-3 h-3 sm:w-4 sm:h-4 ml-1 transform rotate-180" />
     );
   };
+
+useEffect(() => {
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users`);
+      const data = await res.json();
+
+      const fetchedUsers = (Array.isArray(data) ? data : data.users || []).map((u) => ({
+        id: u._id, // 👈 map MongoDB _id to id
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        role: u.role,
+      }));
+
+      setUsers(fetchedUsers);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    }
+  };
+
+  fetchUsers();
+}, []);
+
+
 
   return (
     <div className="p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 sm:space-y-6 md:space-y-8">
@@ -258,6 +347,35 @@ const Users = () => {
                   placeholder="Enter email address"
                 />
               </div>
+
+              {!editingUser && (
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-sm sm:text-base">
+                    Auto-Generated Password
+                  </Label>
+                  <Input
+                    id="password"
+                    type="text"
+                    value={formData.password}
+                    readOnly
+                    className="glass text-sm sm:text-base bg-muted cursor-not-allowed"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This password is automatically generated. You can copy and share it with the user.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setFormData({ ...formData, password: generateRandomPassword() })
+                    }
+                  >
+                    Regenerate Password
+                  </Button>
+                </div>
+              )}
+
 
               <div className="space-y-2">
                 <Label htmlFor="role" className="text-sm sm:text-base">Role</Label>
@@ -438,7 +556,7 @@ const Users = () => {
                   <td className="p-3 sm:p-4">
                     <div className="flex items-center space-x-3">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full gradient-secondary flex items-center justify-center text-white font-bold text-sm">
-                        {user.firstName[0]}{user.lastName[0]}
+                        {user.firstName?.[0] ?? ''}{user.lastName?.[0] ?? ''}
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="font-medium text-sm sm:text-base truncate">
@@ -506,7 +624,7 @@ const Users = () => {
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
                   <div className="w-10 h-10 rounded-full gradient-secondary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                    {user.firstName[0]}{user.lastName[0]}
+                    {user.firstName?.[0] ?? ''}{user.lastName?.[0] ?? ''}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-sm truncate">
