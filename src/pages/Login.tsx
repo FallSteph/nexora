@@ -63,6 +63,8 @@ const Login = () => {
 
     setLoading(true);
     try {
+      console.log("reCAPTCHA token before login:", recaptchaToken);
+
       // ✅ Send token in the correct field name expected by backend
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
         method: 'POST',
