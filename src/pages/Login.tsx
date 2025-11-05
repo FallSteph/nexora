@@ -51,41 +51,29 @@ const Login = () => {
   };
 
   // Manual login
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+const handleLogin = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    // ✅ get real reCAPTCHA token
-    const recaptchaToken = recaptchaRef.current?.getValue();
-    if (!recaptchaToken) {
-      toast.error('Please verify reCAPTCHA');
-      return;
-    }
+  const recaptchaToken = recaptchaRef.current?.getValue();
+  if (!recaptchaToken) {
+    toast.error('Please verify reCAPTCHA');
+    return;
+  }
 
-    setLoading(true);
-    try {
-      console.log("reCAPTCHA token before login:", recaptchaToken);
+  setLoading(true);
+  try {
+    await login(email, password, recaptchaToken); // calls AuthContext login internally
+    toast.success('Welcome back!');
+    navigate('/dashboard');
+  } catch (err: any) {
+    toast.error(err.message || 'Login failed');
+  } finally {
+    setLoading(false);
+    recaptchaRef.current?.reset();
+  }
+};
 
-      // ✅ Send token in the correct field name expected by backend
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, recaptchaToken }),
-      });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
-
-      // ✅ Continue normal login flow
-      await login(email, password, recaptchaToken);
-      toast.success('Welcome back!');
-      navigate('/dashboard');
-    } catch (err: any) {
-      toast.error(err.message || 'Login failed');
-    } finally {
-      setLoading(false);
-      recaptchaRef.current?.reset(); // reset captcha after attempt
-    }
-  };
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
@@ -151,10 +139,13 @@ const Login = () => {
 
             {/* ✅ reCAPTCHA (Single Instance) */}
             <div className="flex justify-center">
-              <ReCAPTCHA
+               <ReCAPTCHA
                 sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY}
                 ref={recaptchaRef}
-                onChange={() => setCaptchaVerified(true)}
+                onChange={(token) => {
+                  setCaptchaVerified(!!token);
+                  console.log("reCAPTCHA token:", token); // for debugging
+                }}
               />
             </div>
 
