@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Mail, Key, Lock, ArrowLeft, Sparkles, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 
 type Step = 'email' | 'code' | 'password';
 
@@ -17,6 +18,7 @@ const ForgotPassword = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const API_URL = import.meta.env.VITE_API_URL;
 
@@ -26,7 +28,7 @@ const ForgotPassword = () => {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/auth/forgot-password`, {
+      const res = await fetch(`${API_URL}/api/auth/forgot/forgot-password`,{
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -51,7 +53,7 @@ const ForgotPassword = () => {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/auth/verify-code`, {
+      const res = await fetch(`${API_URL}/api/auth/forgot/verify-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, code }),
@@ -79,23 +81,32 @@ const ForgotPassword = () => {
       return;
     }
 
+    // Strong password validation
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+
+    if (!passwordRegex.test(newPassword)) {
+      toast.error(
+        'Password must be at least 8 characters long, include 1 uppercase, 1 lowercase, 1 number, and 1 special character.'
+      );
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/auth/reset-password`, {
+      const res = await fetch(`${API_URL}/api/auth/forgot/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: newPassword }),
+        body: JSON.stringify({ email, code, password: newPassword }), // ✅ include the code
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to reset password');
 
-      toast.success('Password changed successfully! You can now login.');
-      setStep('email');
-      setEmail('');
-      setCode('');
-      setNewPassword('');
-      setConfirmPassword('');
+      toast.success('Password changed successfully!');
+      setTimeout(() => {
+        navigate('/login');
+      });
     } catch (err: any) {
       toast.error(err.message || 'Failed to reset password');
     } finally {

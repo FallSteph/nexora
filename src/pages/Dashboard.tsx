@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
-import { useApp } from '@/context/AppContext';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
+import { useApp } from "@/context/AppContext";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { FileBarChart } from "lucide-react";
+import { generateAnalyticsPDF, type PdfScope } from "@/types/pdfGenerator";
 import {
   Dialog,
   DialogContent,
@@ -13,278 +15,377 @@ import {
   DialogTitle,
   DialogFooter,
   DialogTrigger,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { 
-  Plus, 
-  FolderKanban, 
-  Users, 
-  Search, 
-  ArrowUpDown, 
-  Edit, 
-  Trash2
-} from 'lucide-react';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Plus,
+  FolderKanban,
+  Users,
+  ArrowUpDown,
+  Edit,
+  Trash2,
+  Trash,
+  RotateCcw,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-// Use the Project type from your AppContext
-type Project = import('@/context/AppContext').Project;
-
-// Extended interface for projects with createdAt (optional)
-interface ProjectWithDate extends Project {
-  createdAt?: string;
-}
-
-type SortField = 'name' | 'creation';
+type Board = import("@/context/AppContext").Board;
+type SortField = "name" | "creation";
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const { projects, addProject, updateProject, deleteProject } = useApp();
+  const { boards, setBoards, addBoard, updateBoard, deleteBoard } = useApp();
   const navigate = useNavigate();
 
+  // Dialog & PDF state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortField, setSortField] = useState<SortField>('creation');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [editingProject, setEditingProject] = useState<ProjectWithDate | null>(null);
-  const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
+  const [recycleBinOpen, setRecycleBinOpen] = useState(false);
+  const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
+  const [analyticsDialogOpen, setAnalyticsDialogOpen] = useState(false);
+  const [pdfScope, setPdfScope] = useState<PdfScope>("all");
 
-  const [newProjectTitle, setNewProjectTitle] = useState('');
-  const [newProjectDescription, setNewProjectDescription] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<SortField>("creation");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // Filter projects based on search query
-  const filteredProjects = projects.filter(project =>
-    project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const [editingBoard, setEditingBoard] = useState<Board | null>(null);
+  const [boardToDelete, setBoardToDelete] = useState<string | null>(null);
+  const [boardToPermanentDelete, setBoardToPermanentDelete] = useState<string | null>(null);
+  const [deletedBoards, setDeletedBoards] = useState<Board[]>([]);
 
-  // Get creation date for sorting (fallback to project ID for existing projects)
-  const getProjectCreationTime = (project: ProjectWithDate): number => {
-    if (project.createdAt) {
-      return new Date(project.createdAt).getTime();
-    }
-    // For existing projects without createdAt, use project ID as fallback
-    // Assuming newer projects have higher IDs
-    return parseInt(project.id) || 0;
-  };
+  const [newBoardTitle, setNewBoardTitle] = useState("");
+  const [newBoardDescription, setNewBoardDescription] = useState("");
 
-  // Sort projects
-  const sortedProjects = [...filteredProjects].sort((a, b) => {
-    if (sortField === 'name') {
-      return sortOrder === 'asc' 
+const handleGeneratePDF = () => {
+  generateAnalyticsPDF(boards, [user], pdfScope); // ✅ pass boards, users, and scope
+  toast.success("PDF generated successfully!");
+  setAnalyticsDialogOpen(false);
+};
+
+  // ✅ Filter boards - show boards created by user OR where user is a member
+  const filteredBoards = boards.filter((b) => {
+  const matchesSearch =
+    b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    b.description?.toLowerCase().includes(searchQuery.toLowerCase());
+  
+  const isCreator = b.userEmail === user?.email;
+  const isMember = b.members?.some((member) => member.email === user?.email);
+  
+  return matchesSearch && (isCreator || isMember);
+});
+
+  // ✅ Sort boards
+  const getCreationTime = (board: Board) =>
+    board.createdAt ? new Date(board.createdAt).getTime() : 0;
+
+  const sortedBoards = [...filteredBoards].sort((a, b) => {
+    if (sortField === "name") {
+      return sortOrder === "asc"
         ? a.title.localeCompare(b.title)
         : b.title.localeCompare(a.title);
     } else {
-      // Sort by creation date (newest first by default)
-      const timeA = getProjectCreationTime(a as ProjectWithDate);
-      const timeB = getProjectCreationTime(b as ProjectWithDate);
-      return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      const timeA = getCreationTime(a);
+      const timeB = getCreationTime(b);
+      return sortOrder === "asc" ? timeA - timeB : timeB - timeA;
     }
   });
 
-  const handleCreateProject = () => {
-    if (!newProjectTitle.trim()) {
-      toast.error('Project title is required');
-      return;
+  // ✅ Load active boards on mount
+  useEffect(() => {
+    const loadBoards = async () => {
+      if (!user) return;
+      try {
+        // Fetch all boards for admin, or boards where user is creator/member
+        const res = await fetch(
+          user.role === "admin"
+            ? "http://localhost:5000/api/boards?deleted=false"
+            : `http://localhost:5000/api/boards?userEmail=${user.email}&includeMembers=true&deleted=false`
+        );
+        if (!res.ok) throw new Error("Failed to load boards");
+        const data = await res.json();
+        
+        // Properly normalize all IDs including nested lists, cards, and members
+        const normalizedBoards = data.map((board: any) => ({
+          ...board,
+          id: board._id,
+          members: (board.members || []).map((m: any) => typeof m === 'string' ? { email: m } : m),
+          lists: (board.lists || []).map((list: any) => ({
+            ...list,
+            id: list._id,
+            cards: (list.cards || []).map((card: any) => ({ ...card, id: card._id })),
+          })),
+        }));
+
+        
+        setBoards(normalizedBoards);
+      } catch (err) {
+        toast.error("Failed to load boards");
+      }
+    };
+    loadBoards();
+  }, [user, setBoards]);
+
+  // ✅ Load deleted boards for recycle bin
+  useEffect(() => {
+    const loadDeletedBoards = async () => {
+      if (!user) return;
+      try {
+        const res = await fetch(
+          user.role === "admin"
+            ? "http://localhost:5000/api/boards?deleted=true"
+            : `http://localhost:5000/api/boards?userEmail=${user.email}&includeMembers=true&deleted=true`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const normalizedDeletedBoards = data.map((board: any) => ({
+          ...board,
+          id: board._id,
+          members: board.members || [],
+          lists: (board.lists || []).map((list: any) => ({
+            ...list,
+            id: list._id,
+            cards: (list.cards || []).map((card: any) => ({
+              ...card,
+              id: card._id,
+            })),
+          })),
+        }));
+        
+        setDeletedBoards(normalizedDeletedBoards);
+      } catch (err) {
+        console.error("Failed to load deleted boards");
+      }
+    };
+    loadDeletedBoards();
+  }, [user]);
+
+  // ✅ Create board
+  const handleCreateBoard = async () => {
+    if (!newBoardTitle.trim()) return toast.error("Board title is required");
+
+    try {
+      const res = await fetch("http://localhost:5000/api/boards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newBoardTitle,
+          description: newBoardDescription,
+          userEmail: user?.email,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to create board");
+      const data = await res.json();
+
+      addBoard({
+        id: data._id,
+        title: data.title,
+        description: data.description,
+        userEmail: data.userEmail,
+        createdAt: data.createdAt,
+        lists: data.lists || [],
+        members: data.members || [],
+      });
+
+      toast.success("Board created successfully 🎉");
+      setDialogOpen(false);
+      setNewBoardTitle("");
+      setNewBoardDescription("");
+      navigate(`/board/${data._id}`);
+    } catch {
+      toast.error("Error creating board");
     }
-
-    const projectId = Date.now().toString();
-    const boardId = (Date.now() + 1).toString();
-    
-    // Create project with default board and lists
-    addProject({
-      title: newProjectTitle,
-      description: newProjectDescription,
-      boards: [
-        {
-          id: boardId,
-          title: 'Main Board',
-          lists: [
-            {
-              id: '1',
-              title: 'To Do',
-              cards: [
-                {
-                  id: '1',
-                  title: 'Welcome to your board! 🎉',
-                  description: 'This is your first card. You can edit it by clicking on it.',
-                  labels: ['welcome'],
-                  assignedMembers: [],
-                  attachments: [],
-                  comments: [],
-                },
-                {
-                  id: '2',
-                  title: 'Drag and drop cards',
-                  description: 'Try moving this card to "In Progress" or "Done"',
-                  labels: ['tutorial'],
-                  assignedMembers: [],
-                  attachments: [],
-                  comments: [],
-                }
-              ],
-            },
-            {
-              id: '2',
-              title: 'In Progress',
-              cards: [
-                {
-                  id: '3',
-                  title: 'Sample task in progress',
-                  description: 'This card shows how tasks look when they are being worked on',
-                  labels: ['sample', 'in-progress'],
-                  assignedMembers: [],
-                  attachments: [],
-                  comments: [],
-                }
-              ],
-            },
-            {
-              id: '3',
-              title: 'Done',
-              cards: [
-                {
-                  id: '4',
-                  title: 'Completed task example',
-                  description: 'This is how completed tasks appear in your board',
-                  labels: ['sample', 'completed'],
-                  assignedMembers: [],
-                  attachments: [],
-                  comments: [],
-                }
-              ],
-            },
-          ],
-          members: [
-            { email: user?.email || 'user@nexora.io', role: 'manager' }
-          ],
-        }
-      ],
-    });
-
-    toast.success('Project created successfully! 🎉');
-    setDialogOpen(false);
-    setNewProjectTitle('');
-    setNewProjectDescription('');
-    
-    // Navigate to the new project's board
-    setTimeout(() => {
-      navigate(`/board/${projectId}/${boardId}`);
-    }, 100);
   };
 
-  const handleEditProject = (project: ProjectWithDate) => {
-    setEditingProject(project);
-    setNewProjectTitle(project.title);
-    setNewProjectDescription(project.description || '');
+  const handleEditBoard = (board: Board) => {
+    setEditingBoard(board);
+    setNewBoardTitle(board.title);
+    setNewBoardDescription(board.description || "");
     setEditDialogOpen(true);
   };
 
-  const handleUpdateProject = () => {
-    if (!newProjectTitle.trim()) {
-      toast.error('Project title is required');
-      return;
-    }
+const handleUpdateBoard = async () => {
+  if (!editingBoard) return;
+  if (!newBoardTitle.trim()) return toast.error("Title is required");
 
-    if (editingProject) {
-      updateProject(editingProject.id, {
-        title: newProjectTitle,
-        description: newProjectDescription,
-      });
-      toast.success('Project updated successfully! ✨');
-      setEditDialogOpen(false);
-      setEditingProject(null);
-      setNewProjectTitle('');
-      setNewProjectDescription('');
-    }
-  };
+  try {
+    const res = await fetch(`http://localhost:5000/api/boards/${editingBoard.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: newBoardTitle,
+        description: newBoardDescription,
+      }),
+    });
 
-  const handleDeleteClick = (projectId: string) => {
-    setProjectToDelete(projectId);
+    if (!res.ok) throw new Error("Failed to update board");
+
+    const updatedBoard = await res.json();
+
+    // Update frontend state
+    updateBoard(editingBoard.id, {
+      title: updatedBoard.title,
+      description: updatedBoard.description,
+    });
+
+    toast.success("Board updated ✨");
+    setEditDialogOpen(false);
+    setEditingBoard(null);
+  } catch (err) {
+    console.error("Error updating board:", err);
+    toast.error("Error updating board");
+  }
+};
+ 
+
+  const handleDeleteClick = (boardId: string) => {
+    setBoardToDelete(boardId);
     setDeleteDialogOpen(true);
   };
 
-  const handleDeleteProject = () => {
-    if (projectToDelete) {
-      deleteProject(projectToDelete);
-      toast.success('Project deleted');
-      setDeleteDialogOpen(false);
-      setProjectToDelete(null);
-    }
-  };
-
-  const handleOpenProject = (projectId: string) => {
-    const project = projects.find((p) => p.id === projectId);
-    if (project && project.boards.length > 0) {
-      navigate(`/board/${projectId}/${project.boards[0].id}`);
-    } else {
-      toast.error('This project has no boards. Please contact support.');
-    }
-  };
-
-  // Format date for display - use project ID as fallback for creation date
-  const getProjectCreationInfo = (project: ProjectWithDate) => {
-    // For existing projects without createdAt, use a fallback
-    if (project.createdAt) {
-      const date = new Date(project.createdAt);
-      return {
-        date: date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        }),
-        tooltip: `Created on ${date.toLocaleDateString()}`
-      };
-    } else {
-      // Use project ID as a rough estimate (assuming newer projects have higher IDs)
-      const projectIdNum = parseInt(project.id);
-      const fallbackDate = new Date();
-      fallbackDate.setTime(projectIdNum || Date.now());
+  const handleDeleteBoard = async () => {
+    if (!boardToDelete) return;
+    try {
+      // Soft delete on backend
+      const res = await fetch(`http://localhost:5000/api/boards/${boardToDelete}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete board");
       
-      return {
-        date: fallbackDate.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        }),
-        tooltip: 'Creation date estimated'
-      };
+      const deletedBoard = await res.json();
+      
+      // Move to recycle bin state
+      const board = boards.find(b => b.id === boardToDelete);
+      if (board) {
+        setDeletedBoards(prev => [...prev, board]);
+      }
+      
+      // Remove from active boards
+      deleteBoard(boardToDelete);
+      toast.success("Board moved to recycle bin");
+    } catch (err) {
+      toast.error("Failed to delete board");
+    } finally {
+      setDeleteDialogOpen(false);
+      setBoardToDelete(null);
     }
   };
 
-  // Mock analytics data
-  const analytics = {
-    totalProjects: projects.length,
-    activeUsers: 12,
+  const handleRestoreBoard = async (board: Board) => {
+    try {
+      // Restore the board in the database
+      const res = await fetch(`http://localhost:5000/api/boards/${board.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleted: false, deletedAt: null }),
+      });
+      
+      if (!res.ok) throw new Error("Failed to restore board");
+      
+      const restoredBoard = await res.json();
+      
+      // Normalize the restored board data
+      const normalizedBoard = {
+        ...restoredBoard,
+        id: restoredBoard._id,
+        members: restoredBoard.members || [],
+        lists: (restoredBoard.lists || []).map((list: any) => ({
+          ...list,
+          id: list._id,
+          cards: (list.cards || []).map((card: any) => ({
+            ...card,
+            id: card._id,
+          })),
+        })),
+      };
+      
+      // Remove from deleted boards and add to active boards
+      setDeletedBoards(prev => prev.filter(b => b.id !== board.id));
+      addBoard(normalizedBoard);
+      
+      toast.success("Board restored");
+    } catch (error) {
+      toast.error("Failed to restore board");
+      console.error("Error restoring board:", error);
+    }
   };
+
+  const handlePermanentDeleteClick = (boardId: string) => {
+    setBoardToPermanentDelete(boardId);
+    setPermanentDeleteDialogOpen(true);
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!boardToPermanentDelete) return;
+
+    try {
+      const res = await fetch(`http://localhost:5000/api/boards/permanent/${boardToPermanentDelete}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to permanently delete board");
+      setDeletedBoards(prev => prev.filter(b => b.id !== boardToPermanentDelete));
+      toast.success("Board permanently deleted 🗑️");
+    } catch {
+      toast.error("Error deleting board");
+    } finally {
+      setPermanentDeleteDialogOpen(false);
+      setBoardToPermanentDelete(null);
+    }
+  };
+
+  const handleOpenBoard = (id: string) => navigate(`/board/${id}`);
 
   const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      // Toggle direction if same field
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      // New field, set appropriate default order
+    if (sortField === field) setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    else {
       setSortField(field);
-      if (field === 'creation') {
-        setSortOrder('desc'); // Newest first by default
-      } else {
-        setSortOrder('asc'); // A-Z by default
-      }
+      setSortOrder(field === "creation" ? "desc" : "asc");
     }
   };
 
-  const getSortIcon = (field: SortField) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="w-4 h-4 ml-1 opacity-50" />;
+  const getSortIcon = (field: SortField) => (
+    <ArrowUpDown
+      className={`w-4 h-4 ml-1 ${
+        sortField === field && sortOrder === "desc" ? "rotate-180" : ""
+      }`}
+    />
+  );
+
+   const [totalUsers, setTotalUsers] = useState(0);
+
+  // ✅ Analytics from DB
+const analytics = {
+  totalBoards: boards.length,
+  totalLists: boards.reduce((sum, b) => sum + (b.lists?.length || 0), 0),
+  totalCards: boards.reduce(
+    (sum, b) =>
+      sum + b.lists.reduce((cards, l) => cards + (l.cards?.length || 0), 0),
+    0
+  ),
+    totalUsers,
+};
+
+useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/api/users");
+        if (!res.ok) throw new Error("Failed to load users");
+        const data = await res.json();
+        setTotalUsers(data.length);
+      } catch {
+        toast.error("Failed to load users");
+      }
+    };
+
+    if (user?.role === "admin") {
+      loadUsers();
     }
-    return sortOrder === 'asc' ? (
-      <ArrowUpDown className="w-4 h-4 ml-1" />
-    ) : (
-      <ArrowUpDown className="w-4 h-4 ml-1 transform rotate-180" />
-    );
-  };
+  }, [user]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
@@ -294,32 +395,43 @@ const Dashboard = () => {
           <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gradient mb-2">
             Welcome back, {user?.firstName}! 👋
           </h1>
-          <p className="text-muted-foreground text-sm sm:text-base">Manage your projects and track progress</p>
+          <p className="text-muted-foreground text-sm sm:text-base">
+            Manage your boards and track progress
+          </p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-primary hover-glow w-full sm:w-auto">
-              <Plus className="w-4 h-4 mr-2" />
-              New Project
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            onClick={() => setRecycleBinOpen(true)}
+            className="glass"
+          >
+            <Trash className="w-4 h-4 mr-2" />
+            Recycle Bin {deletedBoards.length > 0 && `(${deletedBoards.length})`}
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gradient-primary hover-glow w-full sm:w-auto">
+                <Plus className="w-4 h-4 mr-2" />
+                New Board
+              </Button>
+            </DialogTrigger>
           <DialogContent className="glass-strong border-border max-w-[95vw] sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Create New Project</DialogTitle>
+              <DialogTitle>Create New Board</DialogTitle>
               <DialogDescription>
-                Create a new project with a ready-to-use Kanban board
+                Create a new Kanban board to organize your tasks.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="title">Project Title</Label>
+                <Label htmlFor="title">Board Title</Label>
                 <Input
                   id="title"
-                  placeholder="e.g., Website Redesign"
-                  value={newProjectTitle}
-                  onChange={(e) => setNewProjectTitle(e.target.value)}
+                  placeholder="e.g., Marketing Campaign"
+                  value={newBoardTitle}
+                  onChange={(e) => setNewBoardTitle(e.target.value)}
                   className="glass"
                 />
               </div>
@@ -328,266 +440,405 @@ const Dashboard = () => {
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
-                  placeholder="Brief description of the project..."
-                  value={newProjectDescription}
-                  onChange={(e) => setNewProjectDescription(e.target.value)}
+                  placeholder="Brief description of this board..."
+                  value={newBoardDescription}
+                  onChange={(e) => setNewBoardDescription(e.target.value)}
                   className="glass"
                   rows={3}
                 />
               </div>
-
-              <div className="bg-primary/10 p-3 rounded-lg">
-                <p className="text-sm text-primary font-medium">
-                  🎉 This project will include a starter Kanban board with sample cards to help you get started!
-                </p>
-              </div>
             </div>
 
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)} className="glass w-full sm:w-auto">
+              <Button
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+                className="glass w-full sm:w-auto"
+              >
                 Cancel
               </Button>
-              <Button onClick={handleCreateProject} className="gradient-primary hover-glow w-full sm:w-auto">
-                Create Project
+              <Button
+                onClick={handleCreateBoard}
+                className="gradient-primary hover-glow w-full sm:w-auto"
+              >
+                Create Board
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Analytics (Admin Only) */}
-      {user?.role === 'admin' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          <Card className="glass-strong p-4 sm:p-6 hover-glow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Projects</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gradient mt-2">{analytics.totalProjects}</p>
-              </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl gradient-primary flex items-center justify-center">
-                <FolderKanban className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="glass-strong p-4 sm:p-6 hover-glow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Active Users</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gradient mt-2">{analytics.activeUsers}</p>
-              </div>
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl gradient-secondary flex items-center justify-center">
-                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Search and Sort Bar */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-        <div className="relative w-full sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search projects..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 glass w-full"
-          />
-        </div>
-
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Button
-            variant="outline"
-            onClick={() => handleSort('name')}
-            className="glass flex items-center flex-1 sm:flex-none justify-center"
-          >
-            <span className="hidden sm:inline">Sort by Name</span>
-            <span className="sm:hidden">Name</span>
-            {getSortIcon('name')}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleSort('creation')}
-            className="glass flex items-center flex-1 sm:flex-none justify-center"
-          >
-            <span className="hidden sm:inline">Sort by Creation</span>
-            <span className="sm:hidden">Date</span>
-            {getSortIcon('creation')}
-          </Button>
         </div>
       </div>
 
-      {/* Projects Grid */}
+      {/* Analytics */}
+{user?.role === "admin" && (
+  <>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+      <Card className="glass-strong p-4 sm:p-6 hover-glow">
+        <p className="text-sm text-muted-foreground">Total Boards</p>
+        <p className="text-3xl font-bold text-gradient mt-2">
+          {analytics.totalBoards}
+        </p>
+      </Card>
+
+      <Card className="glass-strong p-4 sm:p-6 hover-glow">
+        <p className="text-sm text-muted-foreground">Total Users</p>
+        <p className="text-3xl font-bold text-gradient mt-2">
+          {analytics.totalUsers}
+        </p>
+      </Card>
+    </div>
+
+    <div className="flex justify-end">
+      <Button
+        onClick={() => setAnalyticsDialogOpen(true)}
+        className="gradient-primary hover-glow"
+      >
+        <FileBarChart className="w-4 h-4 mr-2" />
+        Generate Report
+      </Button>
+    </div>
+  </>
+)}
+      {/* Boards grid */}
       <div>
-        <h2 className="text-xl sm:text-2xl font-bold mb-4">Your Projects</h2>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
+          <h2 className="text-xl sm:text-2xl font-bold">
+            {user?.role === "admin" ? "All Boards" : "Your Boards"}
+          </h2>
+          
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleSort("name")}
+              className="glass"
+            >
+              Name {getSortIcon("name")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleSort("creation")}
+              className="glass"
+            >
+              Date {getSortIcon("creation")}
+            </Button>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {sortedProjects.map((project) => {
-            const creationInfo = getProjectCreationInfo(project as ProjectWithDate);
-            
-            return (
-              <Card
-                key={project.id}
-                className="glass-strong p-4 sm:p-6 hover-glow cursor-pointer group relative"
-                onClick={() => handleOpenProject(project.id)}
-              >
-                <div className="flex items-start justify-between mb-3 sm:mb-4">
-                  <div className="flex items-center space-x-2 sm:space-x-3">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg gradient-primary flex items-center justify-center">
-                      <FolderKanban className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+          {sortedBoards.map((board) => (
+            <Card
+              key={board.id}
+              onClick={() => handleOpenBoard(board.id)}
+              className="glass-strong p-4 sm:p-6 hover-glow cursor-pointer group relative"
+            >
+              <div className="flex items-start justify-between mb-3 sm:mb-4">
+                <div className="flex items-center space-x-2 sm:space-x-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg gradient-primary flex items-center justify-center flex-shrink-0">
+                    <FolderKanban className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-base sm:text-lg group-hover:text-gradient transition-all truncate">
+                      {board.title}
+                    </h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      {board.lists?.length || 0} list
+                      {(board.lists?.length || 0) !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4 line-clamp-2">
+                {board.description || "No description"}
+              </p>
+
+              <div className="flex items-center justify-between">
+                {/* Board Member Avatars */}
+                <div className="flex -space-x-2">
+                  {/* Show project manager first */}
+                  {board.userEmail && (
+                    <Avatar className="w-6 h-6 sm:w-8 sm:h-8 border-2 border-background">
+                      <AvatarFallback className="gradient-primary text-xs text-white">
+                        {board.userEmail[0].toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                  {/* Show other members */}
+                  {board.members?.filter(m => m.email !== board.userEmail).slice(0, 2).map((m, i) => (
+                    <Avatar key={i} className="w-6 h-6 sm:w-8 sm:h-8 border-2 border-background">
+                      <AvatarFallback className="gradient-secondary text-xs text-white">
+                        {m.email[0].toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  ))}
+                  {/* Show +X if more members */}
+                  {board.members && board.members.length > 3 && (
+                    <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full glass flex items-center justify-center text-xs text-white border-2 border-background">
+                      +{board.members.length - 3}
                     </div>
-                    <div>
-                      <h3 className="font-bold text-base sm:text-lg group-hover:text-gradient transition-all">
-                        {project.title}
-                      </h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground">
-                        {project.boards?.length || 0} board{(project.boards?.length || 0) !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
-                <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4 line-clamp-2">
-                  {project.description || 'No description'}
-                </p>
-
-                {/* Creation Date */}
-                <div 
-                  className="flex items-center text-xs text-muted-foreground mb-3 sm:mb-4"
-                  title={creationInfo.tooltip}
-                >
-                  Created {creationInfo.date}
+                <div className="flex space-x-1 sm:space-x-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 sm:h-9 sm:w-9 p-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditBoard(board);
+                    }}
+                  >
+                    <Edit className="w-3 h-3 sm:w-4 sm:h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 sm:h-9 sm:w-9 p-0 text-destructive hover:text-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteClick(board.id);
+                    }}
+                  >
+                    <Trash2 className="w-3 h-3 sm:w-4 sm:h-4" />
+                  </Button>
                 </div>
+              </div>
+            </Card>
+          ))}
 
-                <div className="flex items-center justify-between">
-                  <div className="flex -space-x-2">
-                    {[1, 2, 3].map((i) => (
-                      <div
-                        key={i}
-                        className="w-6 h-6 sm:w-8 sm:h-8 rounded-full gradient-secondary flex items-center justify-center text-xs text-white border-2 border-background"
-                      >
-                        U{i}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex space-x-1 sm:space-x-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 sm:h-9 sm:w-9 p-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditProject(project as ProjectWithDate);
-                      }}
-                    >
-                      <Edit className="w-3 h-3 sm:w-4 sm:h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 sm:h-9 sm:w-9 p-0 text-destructive hover:text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteClick(project.id);
-                      }}
-                    >
-                      <Trash2 className="w-3 h-3 sm:w-4 sm:h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-
-          {sortedProjects.length === 0 && (
+          {boards.length === 0 && (
             <Card className="glass-strong p-6 sm:p-12 col-span-full text-center">
               <FolderKanban className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
               <h3 className="text-lg sm:text-xl font-bold mb-2">
-                {searchQuery ? 'No projects found' : 'No projects yet'}
+                No boards yet
               </h3>
               <p className="text-muted-foreground mb-4 text-sm sm:text-base">
-                {searchQuery 
-                  ? 'Try adjusting your search terms' 
-                  : 'Create your first project to get started with a ready-to-use Kanban board'
-                }
+                Create your first board to get started.
               </p>
-              {!searchQuery && (
-                <Button onClick={() => setDialogOpen(true)} className="gradient-primary hover-glow">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Your First Project
-                </Button>
-              )}
+              <Button
+                onClick={() => setDialogOpen(true)}
+                className="gradient-primary hover-glow"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create Board
+              </Button>
             </Card>
           )}
         </div>
       </div>
 
-      {/* Edit Project Dialog */}
+      {/* Edit Board Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="glass-strong border-border max-w-[95vw] sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit Project</DialogTitle>
-            <DialogDescription>
-              Update project information
-            </DialogDescription>
+            <DialogTitle>Edit Board</DialogTitle>
+            <DialogDescription>Update board information</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-title">Project Title</Label>
-              <Input
-                id="edit-title"
-                placeholder="e.g., Website Redesign"
-                value={newProjectTitle}
-                onChange={(e) => setNewProjectTitle(e.target.value)}
-                className="glass"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="edit-description">Description</Label>
-              <Textarea
-                id="edit-description"
-                placeholder="Brief description of the project..."
-                value={newProjectDescription}
-                onChange={(e) => setNewProjectDescription(e.target.value)}
-                className="glass"
-                rows={3}
-              />
-            </div>
+            <Label htmlFor="edit-title">Board Title</Label>
+            <Input
+              id="edit-title"
+              value={newBoardTitle}
+              onChange={(e) => setNewBoardTitle(e.target.value)}
+              className="glass"
+            />
+            <Label htmlFor="edit-description">Description</Label>
+            <Textarea
+              id="edit-description"
+              value={newBoardDescription}
+              onChange={(e) => setNewBoardDescription(e.target.value)}
+              className="glass"
+              rows={3}
+            />
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="glass w-full sm:w-auto">
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              className="glass w-full sm:w-auto"
+            >
               Cancel
             </Button>
-            <Button onClick={handleUpdateProject} className="gradient-primary hover-glow w-full sm:w-auto">
-              Update Project
+            <Button
+              onClick={handleUpdateBoard}
+              className="gradient-primary hover-glow w-full sm:w-auto"
+            >
+              Update Board
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="glass-strong border-border max-w-[95vw] sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Project</DialogTitle>
+            <DialogTitle>Delete Board</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this project? This action cannot be undone.
+              This board will be moved to the recycle bin. You can restore it later.
             </DialogDescription>
           </DialogHeader>
 
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="glass w-full sm:w-auto">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              className="glass w-full sm:w-auto"
+            >
               Cancel
             </Button>
-            <Button 
-              onClick={handleDeleteProject} 
+            <Button
+              onClick={handleDeleteBoard}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90 w-full sm:w-auto"
             >
-              Delete Project
+              Delete Board
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Recycle Bin Dialog */}
+      <Dialog open={recycleBinOpen} onOpenChange={setRecycleBinOpen}>
+        <DialogContent className="glass-strong border-border max-w-[95vw] sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash className="w-5 h-5" />
+              Recycle Bin
+            </DialogTitle>
+            <DialogDescription>
+              Restore deleted boards or permanently delete them
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {deletedBoards.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Trash className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>Recycle bin is empty</p>
+              </div>
+            ) : (
+              deletedBoards.map((board) => (
+                <Card key={board.id} className="glass p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h3 className="font-bold mb-1">{board.title}</h3>
+                      <p className="text-sm text-muted-foreground line-clamp-1">
+                        {board.description || "No description"}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 ml-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRestoreBoard(board)}
+                        className="glass"
+                      >
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                        Restore
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePermanentDeleteClick(board.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent Delete Confirmation Dialog */}
+      <Dialog open={permanentDeleteDialogOpen} onOpenChange={setPermanentDeleteDialogOpen}>
+        <DialogContent className="glass-strong border-border max-w-[95vw] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Permanently Delete Board?</DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. The board will be permanently deleted from the database.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setPermanentDeleteDialogOpen(false)}
+              className="glass w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handlePermanentDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 w-full sm:w-auto"
+            >
+              Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Analytics PDF Generation Dialog */}
+      <Dialog open={analyticsDialogOpen} onOpenChange={setAnalyticsDialogOpen}>
+        <DialogContent className="glass-strong border-border max-w-[95vw] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileBarChart className="w-5 h-5" />
+              Generate Analytics PDF
+            </DialogTitle>
+            <DialogDescription>
+              Generate a comprehensive PDF report including boards and user data.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-muted-foreground">Select scope:</p>
+            <div className="flex flex-col gap-2">
+              <Button
+                variant={pdfScope === "allUsers" ? "default" : "outline"}
+                onClick={() => setPdfScope("allUsers")}
+                className="w-full"
+              >
+                All Project Manager
+              </Button>
+              <Button
+                variant={pdfScope === "projectOnly" ? "default" : "outline"}
+                onClick={() => setPdfScope("projectOnly")}
+                className="w-full"
+              >
+                Project Only (Members of selected boards)
+              </Button>
+              <Button
+                variant={pdfScope === "all" ? "default" : "outline"}
+                onClick={() => setPdfScope("all")}
+                className="w-full"
+              >
+                All (Boards + Users)
+              </Button>
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setAnalyticsDialogOpen(false)}
+              className="glass w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleGeneratePDF}
+              className="gradient-primary hover-glow w-full sm:w-auto"
+            >
+              Generate PDF
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -596,4 +847,6 @@ const Dashboard = () => {
   );
 };
 
+
 export default Dashboard;
+

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth, User as AuthUser } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { User, Mail, Lock, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
+
 
 type SettingsTab = 'profile' | 'password';
 
@@ -18,64 +19,51 @@ const ProfileSettings = () => {
   const [email, setEmail] = useState(user?.email || '');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
 
-  const handleProfileUpdate = () => {
-    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
-      toast.error('All fields are required');
-      return;
-    }
 
-    updateProfile({
-      firstName,
-      lastName,
-      email,
-    });
-    toast.success('Profile updated successfully! ✨');
-  };
+const handleProfileUpdate = async () => {
+  if (!firstName.trim() && !lastName.trim() && !email.trim() && !selectedAvatarFile) {
+    toast.error("Nothing to update");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("firstName", firstName);
+  formData.append("lastName", lastName);
+  if (user?.authProvider === "local") formData.append("email", email);
+  if (selectedAvatarFile) formData.append("avatar", selectedAvatarFile);
+
+  try {
+    await updateProfile(formData);   // <-- IMPORTANT
+    setPreviewAvatar(null);
+    setSelectedAvatarFile(null);
+    toast.success("Profile updated successfully! ✨");
+  } catch (err) {
+    toast.error("Failed to update profile");
+  }
+};
+
 
   const handleAvatarUploadClick = () => {
     fileInputRef.current?.click();
   };
 
-  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file');
-      return;
-    }
+  if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+    toast.error("Invalid image");
+    return;
+  }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size must be less than 5MB');
-      return;
-    }
+  // Just preview, don’t upload yet
+  setSelectedAvatarFile(file);
+  setPreviewAvatar(URL.createObjectURL(file)); // show instant preview
+};
 
-    setIsUploading(true);
-
-    try {
-      // Simulate file upload process
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Create a blob URL for the uploaded image
-      const imageUrl = URL.createObjectURL(file);
-      
-      // Update profile with new avatar
-      updateProfile({ avatar: imageUrl });
-      toast.success('Avatar uploaded successfully! 🎉');
-      
-      // Clear the file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    } catch (error) {
-      toast.error('Failed to upload avatar. Please try again.');
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   const handleAvatarDelete = () => {
     updateProfile({ avatar: undefined });
@@ -92,7 +80,19 @@ const ProfileSettings = () => {
       {/* Avatar */}
       <div className="flex items-center space-x-6">
         <Avatar className="w-24 h-24 border-2 border-border">
-          <AvatarImage src={user?.avatar} />
+        <AvatarImage
+                src={
+                  previewAvatar
+                    ? previewAvatar
+                    : user?.avatar
+                      ? typeof user.avatar === "string"
+                        ? user.avatar.startsWith("http")
+                          ? user.avatar
+                          : `${import.meta.env.VITE_API_URL}${user.avatar}`
+                        : undefined
+                      : undefined
+                }
+              />
           <AvatarFallback className="text-2xl gradient-primary text-white">
             {user?.firstName?.[0]}{user?.lastName?.[0]}
           </AvatarFallback>
@@ -191,7 +191,6 @@ const ProfileSettings = () => {
       <Button 
         onClick={handleProfileUpdate} 
         className="gradient-primary hover-glow"
-        disabled={!firstName.trim() || !lastName.trim() || !email.trim()}
       >
         Save Changes
       </Button>
@@ -199,15 +198,28 @@ const ProfileSettings = () => {
   );
 };
 
-// Password Settings Component
 const PasswordSettings = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showHints, setShowHints] = useState(false);
 
-  const handlePasswordChange = () => {
+  const { changePassword } = useAuth();
+
+  // Password strength rules
+ const passwordChecks = [
+  { label: "At least 8 characters", valid: newPassword.length >= 8 },
+  { label: "Contains a lowercase letter", valid: /[a-z]/.test(newPassword) },
+  { label: "Contains an uppercase letter", valid: /[A-Z]/.test(newPassword) }, // ✅ NEW
+  { label: "Contains a number", valid: /[0-9]/.test(newPassword) },
+  { label: "Contains a special character (!@#$%^&* etc.)", valid: /[^A-Za-z0-9]/.test(newPassword) },
+];
+
+  const isStrongPassword = passwordChecks.every(check => check.valid);
+
+  const handlePasswordChange = async () => {
     if (!currentPassword || !newPassword || !confirmPassword) {
-      toast.error('All password fields are required');
+      toast.error('All fields are required');
       return;
     }
 
@@ -216,90 +228,95 @@ const PasswordSettings = () => {
       return;
     }
 
-    if (newPassword.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (!isStrongPassword) {
+      toast.error('Your password does not meet the strength requirements ⚠️');
       return;
     }
 
-    // Simulate password change process
-    toast.success('Password changed successfully! 🔒');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
+    try {
+      await changePassword(currentPassword, newPassword);
+      toast.success('Password changed successfully! 🔒');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      toast.error(err.message || "Failed to change password");
+    }
   };
-
-  const isFormValid = currentPassword && newPassword && confirmPassword && newPassword.length >= 6 && newPassword === confirmPassword;
 
   return (
     <Card className="glass-strong p-6 space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold mb-1">Password Settings</h2>
-        <p className="text-sm text-muted-foreground">Update your password</p>
-      </div>
+      <h2 className="text-2xl font-bold mb-1">Password Settings</h2>
 
       <div className="space-y-4">
+
+        {/* Current password */}
         <div className="space-y-2">
-          <Label htmlFor="currentPassword">Current Password</Label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="currentPassword"
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="pl-10 glass"
-              placeholder="Enter current password"
-            />
-          </div>
+          <Label>Current Password</Label>
+          <Input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="glass" />
         </div>
 
+        {/* New password with live validation */}
         <div className="space-y-2">
-          <Label htmlFor="newPassword">New Password</Label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="newPassword"
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="pl-10 glass"
-              placeholder="Enter new password"
-            />
-          </div>
-          {newPassword && newPassword.length < 6 && (
-            <p className="text-xs text-destructive">Password must be at least 6 characters</p>
+          <Label>New Password</Label>
+          <Input type="password" value={newPassword}onFocus={() => setShowHints(true)}
+            onBlur={() => !newPassword && setShowHints(false)}
+            onChange={e => setNewPassword(e.target.value)} className="glass" />
+
+          {/* Minimalist Helper — shows only when focused or has text */}
+          {showHints && (
+            <div className="mt-2 text-[11px] text-muted-foreground space-y-1 pl-1">
+              {passwordChecks.map((check, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className={check.valid ? "text-green-500" : "text-zinc-400"}>
+                    {check.valid ? "●" : "○"}
+                  </span>
+                  <span className={check.valid ? "text-green-600" : ""}>
+                    {check.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+            )}
+            </div>
+
+        {/* Confirm password */}
+        <div className="space-y-2">
+          <Label>Confirm New Password</Label>
+          <Input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            className="glass"
+            disabled={!isStrongPassword} // ⬅ Only allow if password meets requirements
+          />
+
+          {!isStrongPassword && newPassword && (
+            <p className="text-xs text-destructive pl-1">
+              You must meet password requirements before continuing.
+            </p>
+          )}
+
+          {isStrongPassword && confirmPassword && newPassword !== confirmPassword && (
+            <p className="text-xs text-destructive pl-1">
+              Passwords do not match.
+            </p>
           )}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="confirmPassword">Confirm New Password</Label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="confirmPassword"
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="pl-10 glass"
-              placeholder="Confirm new password"
-            />
-          </div>
-          {confirmPassword && newPassword !== confirmPassword && (
-            <p className="text-xs text-destructive">Passwords do not match</p>
-          )}
-        </div>
       </div>
 
       <Button 
-        onClick={handlePasswordChange} 
+        onClick={handlePasswordChange}
         className="gradient-primary hover-glow"
-        disabled={!isFormValid}
+        disabled={!currentPassword || !newPassword || !confirmPassword}
       >
         Change Password
       </Button>
     </Card>
   );
 };
+
 
 // Main Settings Component
 const Settings = () => {

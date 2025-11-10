@@ -1,23 +1,26 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { CardModal } from '@/components/CardModal';
-import { ShareBoardModal } from '@/components/ShareBoardModal';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { addEventToGoogleCalendar, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from "@/types/google";
+
+
+// Modals are defined inline below
 import { 
   ArrowLeft, Share2, Plus, MoreVertical, Pencil, Trash2, 
   MessageCircle, Paperclip, Upload, X, User, Search,
   Settings, Filter, Users, Download, Eye, FileText, Menu,
-  Calendar, Tag, CheckCircle
+  Calendar, Tag, CheckCircle, Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
+import axios from 'axios';
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, useSensor, useSensors, closestCorners } from '@dnd-kit/core';
 import { SortableContext, arrayMove, verticalListSortingStrategy, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Card as CardType, List } from '@/context/AppContext';
+import { Card as CardType, List, Board as BoardType } from '@/context/AppContext';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +29,53 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { CardTitle } from '@/components/ui/card';
+
+// Notification Service - Sends notifications to backend
+const sendNotification = async (
+  recipientEmail: string,
+  type: 'board_added' | 'card_assigned' | 'card_comment',
+  data: {
+    boardTitle?: string;
+    boardId?: string;
+    cardTitle?: string;
+    cardId?: string;
+    commentText?: string;
+    senderName?: string;
+  }
+) => {
+  try {
+    const token = localStorage.getItem('token');
+
+    // Construct required message
+    let message = '';
+    if (type === 'board_added') {
+      message = `${data.senderName} added you to board "${data.boardTitle}"`;
+    } else if (type === 'card_assigned') {
+      message = `${data.senderName} assigned you to card "${data.cardTitle}" on board "${data.boardTitle}"`;
+    } else if (type === 'card_comment') {
+      message = `${data.senderName} commented on "${data.cardTitle}": "${data.commentText}"`;
+    }
+
+    await axios.post(
+      'http://localhost:5000/api/notifications',
+      {
+        userEmail: recipientEmail, // matches schema
+        type,
+        message,                  // required field
+        boardTitle: data.boardTitle,
+        boardId: data.boardId,
+        cardId: data.cardId,
+        addedBy: data.senderName
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (error) {
+    console.error('Failed to send notification:', error);
+  }
+};
+
+
 
 // Enhanced responsive scrollbar styles - FIXED: Consistent scrollbar styling
 const scrollbarStyles = `
@@ -275,6 +325,9 @@ interface EnhancedCardModalProps {
   onSave: (updates: Partial<CardType>) => void;
   onDelete: () => void;
   boardMembers: { email: string; role: 'member' | 'manager' }[];
+  lists?: List[];
+  currentListId?: string;
+  onMoveCard?: (targetListId: string) => void;
 }
 
 // Attachment type
@@ -464,6 +517,11 @@ const EnhancedShareBoardModal = ({
   const [pendingMembers, setPendingMembers] = useState<{ email: string; role: 'member' | 'manager' }[]>(board.members);
   const [pendingChanges, setPendingChanges] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<{ email: string; role: 'member' | 'manager' } | null>(null);
+  
+  // User autocomplete state
+  const [allUsers, setAllUsers] = useState<Array<{ email: string; firstName: string; lastName: string }>>([]);
+  const [filteredUsers, setFilteredUsers] = useState<Array<{ email: string; firstName: string; lastName: string }>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -471,6 +529,24 @@ const EnhancedShareBoardModal = ({
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Fetch all users for autocomplete
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch('http://localhost:5000/api/users');
+        if (!res.ok) throw new Error('Failed to fetch users');
+        const data = await res.json();
+        setAllUsers(data);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+      }
+    };
+    
+    if (isOpen) {
+      fetchUsers();
+    }
+  }, [isOpen]);
 
   // Initialize pending members when modal opens
   useEffect(() => {
@@ -480,6 +556,26 @@ const EnhancedShareBoardModal = ({
       setMemberToRemove(null);
     }
   }, [isOpen, board.members]);
+  
+  // Filter users based on email input
+  useEffect(() => {
+    if (email.trim().length > 0) {
+      const filtered = allUsers.filter(user => 
+        user.email.toLowerCase().includes(email.toLowerCase()) &&
+        !pendingMembers.some(m => m.email === user.email)
+      );
+      setFilteredUsers(filtered);
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setFilteredUsers([]);
+      setShowSuggestions(false);
+    }
+  }, [email, allUsers, pendingMembers]);
+
+  const handleSelectUser = (userEmail: string) => {
+    setEmail(userEmail);
+    setShowSuggestions(false);
+  };
 
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
@@ -489,6 +585,7 @@ const EnhancedShareBoardModal = ({
       setEmail('');
       setRole('manager'); // Reset to manager after adding
       setPendingChanges(true);
+      setShowSuggestions(false);
       toast.success('Member added to pending changes');
     } else {
       toast.error('Member already exists or invalid email');
@@ -517,10 +614,31 @@ const EnhancedShareBoardModal = ({
     }
   };
 
-  const handleSaveChanges = () => {
+  const handleSaveChanges = async () => {
+    // Find newly added members by comparing with original board.members
+    const originalMemberEmails = board.members.map((m: any) => m.email);
+    const newlyAddedMembers = pendingMembers.filter(
+      member => !originalMemberEmails.includes(member.email)
+    );
+    
+    // Send notifications to newly added members
+for (const member of newlyAddedMembers) {
+  await sendNotification(
+    member.email,
+    'board_added',
+    {
+      boardTitle: board.title,
+      boardId: board.id,
+      senderName: 'Board Admin'
+    }
+  );
+}
+
+    
     onUpdateMembers(pendingMembers);
     setPendingChanges(false);
     toast.success('Board members updated successfully');
+    onClose(); // Close modal after saving
   };
 
   const handleClose = () => {
@@ -559,13 +677,42 @@ const EnhancedShareBoardModal = ({
               <div>
                 <label className="block text-sm font-medium mb-2">Add Team Member</label>
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <Input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter email address"
-                    className="glass flex-1"
-                  />
+                  <div className="relative flex-1">
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => email.trim().length > 0 && setShowSuggestions(true)}
+                      placeholder="Enter email address"
+                      className="glass"
+                      autoComplete="off"
+                    />
+                    {/* User suggestions dropdown - Minimal styling */}
+                    {showSuggestions && filteredUsers.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-slate-900/95 backdrop-blur-sm rounded-lg border border-purple-500/30 shadow-xl max-h-48 overflow-y-auto modal-scrollbar">
+                        {filteredUsers.map((user) => (
+                          <button
+                            key={user.email}
+                            type="button"
+                            onClick={() => handleSelectUser(user.email)}
+                            className="w-full text-left px-4 py-2.5 hover:bg-purple-500/20 transition-colors flex items-center gap-3 border-b border-white/5 last:border-0"
+                          >
+                            <Avatar className="w-8 h-8">
+                              <AvatarFallback className="bg-purple-500/30 text-white text-xs font-medium">
+                                {user.email[0].toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-white truncate">
+                                {user.firstName} {user.lastName}
+                              </p>
+                              <p className="text-xs text-purple-300/80 truncate">{user.email}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   {/* FIXED: Enhanced select styling with proper purple/glass theme */}
                   <div className="relative sm:w-32">
                     <select
@@ -573,8 +720,7 @@ const EnhancedShareBoardModal = ({
                       onChange={(e) => setRole(e.target.value as 'member' | 'manager')}
                       className="glass-select w-full h-10 text-sm focus:ring-2 focus:ring-purple-500 appearance-none cursor-pointer pr-8"
                     >
-                      <option value="manager">Manager</option>
-                      <option value="member">Member</option>
+                      <option value="member">Team Member</option>
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-purple-300">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -593,51 +739,48 @@ const EnhancedShareBoardModal = ({
             <div>
               <h3 className="font-semibold mb-3">Board Members ({pendingMembers.length})</h3>
               <div className="space-y-3 max-h-60 overflow-y-auto modal-scrollbar">
-                {pendingMembers.map((member, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-3 glass rounded-lg"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <Avatar className="w-8 h-8 flex-shrink-0">
-                        <AvatarFallback className="gradient-secondary text-sm">
-                          {member.email[0].toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{member.email}</p>
-                        <p className="text-xs text-purple-300 capitalize">{member.role}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* FIXED: Enhanced role dropdown with consistent theme styling */}
-                      <div className="relative">
-                        <select
-                          value={member.role}
-                          onChange={(e) => handleRoleChange(member.email, e.target.value as 'member' | 'manager')}
-                          className="role-dropdown appearance-none cursor-pointer pr-6"
-                        >
-                          <option value="manager">Manager</option>
-                          <option value="member">Member</option>
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1 text-purple-300">
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
+                {pendingMembers.map((member) => {
+                  const isProjectManager = member.email === board.userEmail;
+                  // Only two roles: Project Manager (owner) and Team Member (everyone else)
+                  const roleLabel = isProjectManager 
+                    ? 'Project Manager' 
+                    : 'Team Member';
+                  
+                  return (
+                    <div
+                      key={member.email}
+                      className="flex items-center justify-between p-3 glass rounded-lg"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <Avatar className="w-8 h-8 flex-shrink-0">
+                          <AvatarFallback className="gradient-secondary text-sm">
+                            {member.email[0].toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">{member.email}</p>
+                          <p className="text-xs text-purple-300">{roleLabel}</p>
                         </div>
                       </div>
-                      
-                      <button
-                        onClick={() => handleRemovePendingMember(member)}
-                        className="h-8 w-8 rounded-lg glass hover:bg-red-500/20 hover:text-red-400 flex items-center justify-center transition-all border border-white/20"
-                        title="Remove member"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {/* Only show remove button for non-project managers */}
+                        {!isProjectManager && (
+                          <>
+                            
+                            <button
+                              onClick={() => handleRemovePendingMember(member)}
+                              className="h-8 w-8 rounded-lg glass hover:bg-red-500/20 hover:text-red-400 flex items-center justify-center transition-all border border-white/20"
+                              title="Remove member"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -699,13 +842,19 @@ const EnhancedCardModal = ({
   onClose, 
   onSave, 
   onDelete, 
-  boardMembers 
+  boardMembers,
+  lists = [],
+  currentListId,
+  onMoveCard
 }: EnhancedCardModalProps) => {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description || '');
   const [labels, setLabels] = useState(card.labels);
   const [newLabel, setNewLabel] = useState('');
   const [assignedMembers, setAssignedMembers] = useState(card.assignedMembers);
+  const [memberDeadlines, setMemberDeadlines] = useState<Record<string, string>>(
+    (card as any).memberDeadlines || {}
+  );
   const [comments, setComments] = useState<ModalComment[]>(
     card.comments.map(comment => ({
       id: Date.now().toString() + Math.random(),
@@ -726,6 +875,12 @@ const EnhancedCardModal = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchMember, setSearchMember] = useState('');
   const [isMobile, setIsMobile] = useState(false);
+  const [showUploadChoice, setShowUploadChoice] = useState(false);
+  const [selectedListId, setSelectedListId] = useState(currentListId || '');
+  const [memberEventIds, setMemberEventIds] = useState<Record<string, string>>(
+  (card as any).memberEventIds || {}
+);
+
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -745,15 +900,69 @@ const EnhancedCardModal = ({
     setLabels(labels.filter(label => label !== labelToRemove));
   };
 
-  const handleToggleMember = (member: string) => {
+  const handleToggleMember = async (member: string) => {
     if (assignedMembers.includes(member)) {
       setAssignedMembers(assignedMembers.filter(m => m !== member));
+      // Remove deadline when member is removed
+      const updatedDeadlines = { ...memberDeadlines };
+      delete updatedDeadlines[member];
+      setMemberDeadlines(updatedDeadlines);
     } else {
       setAssignedMembers([...assignedMembers, member]);
+      
+      // Send notification to newly assigned member
+await sendNotification(
+  member,
+  'card_assigned',
+  {
+    cardTitle: title,
+    cardId: card.id,
+    boardTitle: 'Current Board', // match schema
+    senderName: 'Project Manager'
+  }
+);
+      toast.success(`${member} has been notified about their assignment`);
     }
   };
 
-  const handleAddComment = () => {
+const handleMemberDeadlineChange = async (memberEmail: string, date: string) => {
+  setMemberDeadlines(prev => ({ ...prev, [memberEmail]: date }));
+
+  if (!date) return;
+
+  try {
+    const existingEventId = memberEventIds[memberEmail];
+
+    if (existingEventId) {
+      // Update existing event
+      await updateGoogleCalendarEvent(existingEventId, {
+        title: title,
+        description: `Deadline for ${memberEmail}`,
+        dueDate: date,
+      }, [memberEmail]);
+    } else {
+      // Create new event
+      const newEventId = await addEventToGoogleCalendar({
+        title,
+        description: `Deadline for ${memberEmail}`,
+        dueDate: date,
+        assignedMembers: [memberEmail],
+      });
+
+      if (newEventId) {
+        setMemberEventIds(prev => ({ ...prev, [memberEmail]: newEventId }));
+      }
+    }
+
+    toast.success(`Deadline synced to Google Calendar for ${memberEmail}`);
+  } catch (err) {
+    console.error(err);
+    toast.error(`Failed to sync deadline for ${memberEmail}`);
+  }
+};
+
+
+  const handleAddComment = async () => {
     if (newComment.trim()) {
       const comment: ModalComment = {
         id: Date.now().toString() + Math.random(),
@@ -763,6 +972,25 @@ const EnhancedCardModal = ({
       };
       setComments([...comments, comment]);
       setNewComment('');
+      
+      // Send notification to all assigned members about the new comment
+for (const member of assignedMembers) {
+  await sendNotification(
+    member,
+    'card_comment', // match enum
+    {
+      cardTitle: title,
+      cardId: card.id,
+      commentText: newComment.trim(),
+      senderName: 'Team Member'
+    }
+  );
+}
+
+      
+      if (assignedMembers.length > 0) {
+        toast.success('Assigned members notified about the comment');
+      }
     }
   };
 
@@ -779,23 +1007,88 @@ const EnhancedCardModal = ({
     }
   };
 
+  const handleUploadFromDevice = () => {
+    setShowUploadChoice(false);
+    fileInputRef.current?.click();
+  };
+
+const handleUploadFromGoogleDrive = () => {
+  setShowUploadChoice(false);
+
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+
+  if (!clientId || !apiKey) {
+    return toast.error("Missing Google API credentials.");
+  }
+
+  // Load picker + drive
+  window.gapi.load("client:picker", async () => {
+    await window.gapi.client.load("drive", "v3");
+
+    const tokenClient = window.google.accounts.oauth2.initCodeClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      ux_mode: "popup",
+      callback: (response: any) => {
+        if (!response.access_token) return;
+
+        const picker = new window.google.picker.PickerBuilder()
+          .addView(new window.google.picker.DocsView().setIncludeFolders(true))
+          .setOAuthToken(response.access_token)
+          .setDeveloperKey(apiKey)
+          .setCallback(handlePickerSelection)
+          .build();
+        picker.setVisible(true);
+      },
+    });
+
+    tokenClient.requestCode();
+  });
+};
+
+const handlePickerSelection = (data: any) => {
+  if (data.action === window.google.picker.Action.PICKED) {
+    const file = data.docs[0];
+
+    const newAttachment = {
+      id: file.id,
+      name: file.name,
+      size: "Google Drive File",
+      type: file.mimeType || "file",
+      drive: true,
+    };
+
+    setAttachments(prev => [...prev, newAttachment]);
+    toast.success(`Added from Google Drive: ${file.name}`);
+  }
+};
+
+
+
   const handleRemoveAttachment = (attachmentId: string) => {
     setAttachments(attachments.filter(a => a.id !== attachmentId));
   };
 
   const handleSave = () => {
+    if (!title.trim()) {
+      toast.error('Card title is required');
+      return;
+    }
     onSave({
       title,
       description,
       labels,
       assignedMembers,
+      memberDeadlines,
+      memberEventIds,
       comments: comments.map(comment => ({
         user: comment.user,
         text: comment.text,
         timestamp: new Date(comment.timestamp)
       })),
       attachments: attachments.map(att => att.name),
-    });
+    } as any);
     onClose();
   };
 
@@ -809,7 +1102,9 @@ const EnhancedCardModal = ({
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 mobile-safe-padding mobile-bottom-safe">
       <div className={`glass-strong rounded-2xl w-full ${isMobile ? 'max-w-full h-full' : 'max-w-4xl max-h-[90vh]'} overflow-hidden flex flex-col`}>
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-white/10">
-          <h2 className="text-xl sm:text-2xl font-bold">Edit Card</h2>
+          <h2 className="text-xl sm:text-2xl font-bold">
+            {card.id === 'temp-new-card' ? 'Add Card' : 'Edit Card'}
+          </h2>
           <button
             onClick={onClose}
             className="h-10 w-10 rounded-lg glass hover-glow flex items-center justify-center transition-all"
@@ -839,6 +1134,42 @@ const EnhancedCardModal = ({
               placeholder="Add a detailed description..."
             />
           </div>
+
+          {/* Move Card Section - Only show for existing cards */}
+          {card.id !== 'temp-new-card' && lists.length > 1 && onMoveCard && (
+            <div>
+              <label className="block text-sm font-medium mb-3">Move Card</label>
+              <div className="flex items-center gap-3">
+                <select
+                  value={selectedListId}
+                  onChange={(e) => setSelectedListId(e.target.value)}
+                  className="glass-select flex-1 h-11 text-sm focus:ring-2 focus:ring-purple-500 appearance-none cursor-pointer pr-10"
+                >
+                  {lists.map((list) => (
+                    <option key={list.id} value={list.id}>
+                      {list.title}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  onClick={() => {
+                    if (selectedListId && selectedListId !== currentListId) {
+                      onMoveCard(selectedListId);
+                      toast.success('Card moved to ' + lists.find(l => l.id === selectedListId)?.title);
+                      onClose();
+                    }
+                  }}
+                  disabled={selectedListId === currentListId}
+                  className="gradient-primary px-6 py-2.5 rounded-lg hover-glow disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Move
+                </Button>
+              </div>
+              <p className="text-xs text-purple-300/70 mt-2">
+                {selectedListId === currentListId ? 'Card is already in this list' : 'Select a different list to move this card'}
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-3">Labels</label>
@@ -908,6 +1239,57 @@ const EnhancedCardModal = ({
                 ))}
               </div>
             </div>
+
+            {/* Member Deadlines Section */}
+            {assignedMembers.length > 0 && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium mb-3 flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  Member Deadlines
+                </label>
+                <div className="space-y-3">
+                  {assignedMembers.map((member, idx) => (
+                    <div key={idx} className="glass rounded-lg p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <Avatar className="w-6 h-6 flex-shrink-0">
+                            <AvatarFallback className="gradient-secondary text-xs">
+                              {member[0].toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-sm truncate">{member}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-purple-300 flex-shrink-0" />
+                          <Input
+                            type="date"
+                            value={memberDeadlines[member] || ""}
+                            onChange={async (e) => {
+                              const date = e.target.value;
+                              setMemberDeadlines(prev => ({ ...prev, [member]: date }));
+
+                              try {
+                                await addEventToGoogleCalendar({
+                                  title: `Task Deadline in ${CardTitle}`,
+                                  dueDate: date,
+                                  assignedMembers: [member],
+                                });
+                                toast.success(`Deadline added to ${member}'s Google Calendar`);
+                              } catch (err) {
+                                console.error(err);
+                                toast.error(`Failed to add deadline to ${member}'s Google Calendar`);
+                              }
+                            }}
+                            className="glass h-8 text-xs w-32"
+                          />
+
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -944,13 +1326,50 @@ const EnhancedCardModal = ({
               className="hidden"
             />
             <Button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setShowUploadChoice(true)}
               className="w-full glass rounded-lg px-4 py-4 flex items-center justify-center gap-2 hover-glow"
             >
               <Upload className="w-5 h-5" />
               Upload Files
             </Button>
           </div>
+
+          {/* Upload Choice Dialog */}
+          {showUploadChoice && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+              <div className="glass-strong rounded-2xl p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-bold mb-2">Choose Upload Method</h3>
+                <p className="text-purple-200 mb-6">
+                  Select how you'd like to upload your files
+                </p>
+                <div className="space-y-3">
+                  <Button
+                    onClick={handleUploadFromDevice}
+                    className="w-full gradient-primary hover-glow flex items-center justify-center gap-3 h-14"
+                  >
+                    <Upload className="w-5 h-5" />
+                    Upload from Device
+                  </Button>
+                  <Button
+                    onClick={handleUploadFromGoogleDrive}
+                    className="w-full glass hover-glow flex items-center justify-center gap-3 h-14"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12.545 10.239l3.605 6.242h-7.21l3.605-6.242zM7.473 18.307L2 9.5l5.473-8.807h10.054L23 9.5l-5.473 8.807H7.473z"/>
+                    </svg>
+                    Upload from Google Drive
+                  </Button>
+                  <Button
+                    onClick={() => setShowUploadChoice(false)}
+                    variant="ghost"
+                    className="w-full glass hover-glow"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-3 flex items-center gap-2">
@@ -994,15 +1413,17 @@ const EnhancedCardModal = ({
         </div>
 
         <div className="flex items-center justify-between p-4 sm:p-6 border-t border-white/10">
-          <Button
-            onClick={onDelete}
-            variant="ghost"
-            className="text-red-400 hover:bg-red-500/20 px-3 sm:px-4 py-2 text-sm sm:text-base"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            {isMobile ? 'Delete' : 'Delete Card'}
-          </Button>
-          <div className="flex gap-2 sm:gap-3">
+          {card.id !== 'temp-new-card' && (
+            <Button
+              onClick={onDelete}
+              variant="ghost"
+              className="text-red-400 hover:bg-red-500/20 px-3 sm:px-4 py-2 text-sm sm:text-base"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {isMobile ? 'Delete' : 'Delete Card'}
+            </Button>
+          )}
+          <div className={`flex gap-2 sm:gap-3 ${card.id === 'temp-new-card' ? 'ml-auto' : ''}`}>
             <Button
               onClick={onClose}
               variant="ghost"
@@ -1014,7 +1435,7 @@ const EnhancedCardModal = ({
               onClick={handleSave}
               className="gradient-primary px-4 sm:px-8 py-2 hover-glow text-sm sm:text-base"
             >
-              {isMobile ? 'Save' : 'Save Changes'}
+              {card.id === 'temp-new-card' ? 'Create Card' : (isMobile ? 'Save' : 'Save Changes')}
             </Button>
           </div>
         </div>
@@ -1035,18 +1456,42 @@ const CompactCardFooter = ({
   onDownloadAttachment?: (attachmentName: string, e: React.MouseEvent) => void;
   onViewDescription?: (e: React.MouseEvent) => void;
 }) => {
+  const memberDeadlines = (card as any).memberDeadlines || {};
+  const hasUpcomingDeadline = Object.values(memberDeadlines).some((deadline: any) => {
+    if (!deadline) return false;
+    const deadlineDate = new Date(deadline);
+    const today = new Date();
+    const diffDays = Math.ceil((deadlineDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays <= 3 && diffDays >= 0;
+  });
+
   return (
     <div className="flex items-center justify-between mt-3">
       {/* Left side: Profile icons */}
       {card.assignedMembers.length > 0 && (
         <div className="flex -space-x-1.5">
-          {card.assignedMembers.slice(0, 3).map((member, idx) => (
-            <Avatar key={idx} className="w-6 h-6 border-2 border-slate-900 hover:scale-110 smooth-transition">
-              <AvatarFallback className="gradient-secondary text-xs font-medium">
-                {member[0].toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-          ))}
+          {card.assignedMembers.slice(0, 3).map((member, idx) => {
+            const deadline = memberDeadlines[member];
+            const isUrgent = deadline && (() => {
+              const deadlineDate = new Date(deadline);
+              const today = new Date();
+              const diffDays = Math.ceil((deadlineDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              return diffDays <= 3 && diffDays >= 0;
+            })();
+            
+            return (
+              <div key={idx} className="relative">
+                <Avatar className={`w-6 h-6 border-2 ${isUrgent ? 'border-red-500' : 'border-slate-900'} hover:scale-110 smooth-transition`}>
+                  <AvatarFallback className="gradient-secondary text-xs font-medium">
+                    {member[0].toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                {isUrgent && (
+                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                )}
+              </div>
+            );
+          })}
           {card.assignedMembers.length > 3 && (
             <Avatar className="w-6 h-6 border-2 border-slate-900">
               <AvatarFallback className="glass text-xs font-medium">
@@ -1059,6 +1504,15 @@ const CompactCardFooter = ({
 
       {/* Right side: Clickable Icons with event prevention */}
       <div className="flex items-center gap-1 ml-auto">
+        {/* Deadline Warning Icon */}
+        {hasUpcomingDeadline && (
+          <div
+            className="flex items-center gap-1 text-xs text-red-400 bg-red-500/20 rounded-lg px-2 py-1"
+            title="Urgent deadline"
+          >
+            <Clock className="w-3 h-3 animate-pulse" />
+          </div>
+        )}
         {/* Description Icon */}
         {card.description && (
           <button
@@ -1265,7 +1719,7 @@ const KanbanList = ({
       className={`flex-shrink-0 ${isMobile ? 'w-72' : 'w-80'} glass-strong rounded-2xl p-4 flex flex-col h-full smooth-transition`}
     >
       {/* Enhanced List Header - FIXED: Reduced spacing to move count badge left */}
-      <div className="flex items-center justify-between mb-4" {...attributes} {...listeners}>
+      <div className="flex items-center justify-between mb-4">
         <div className="flex-1 mr-2 min-w-0"> {/* Changed from mr-3 to mr-2 */}
           {editingListId === list.id ? (
             <Input
@@ -1395,16 +1849,65 @@ const MobileMenu = ({ onShare, onAddList, isAddingList }: MobileMenuProps) => (
   </div>
 );
 
+// Confirm Dialog Component
+const ConfirmDialog = ({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  title, 
+  description 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: () => void; 
+  title: string; 
+  description: string; 
+}) => {
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="glass-strong rounded-2xl p-6 max-w-md w-full mx-4">
+        <h3 className="text-lg font-bold mb-2">{title}</h3>
+        <p className="text-purple-200 mb-6">{description}</p>
+        <div className="flex gap-3">
+          <Button onClick={onClose} variant="ghost" className="flex-1 glass hover-glow">
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} className="flex-1 bg-red-500 hover:bg-red-600 text-white">
+            Confirm
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Main Board Component with FIXED header spacing
 const Board = () => {
-  const { projectId, boardId } = useParams<{ projectId: string; boardId: string }>();
+  // only boardId is needed now
+  const { boardId } = useParams<{ boardId: string }>();
   const navigate = useNavigate();
-  const { projects, updateBoard, addList, updateList, deleteList, reorderLists, addCard, updateCard, deleteCard, moveCard } = useApp();
+  const { user } = useAuth();
 
-  const project = projects.find((p) => p.id === projectId);
-  const board = project?.boards.find((b) => b.id === boardId);
+  const {
+    boards,
+    updateBoard,
+    addList,
+    updateList,
+    deleteList,
+    reorderLists,
+    addCard,
+    updateCard,
+    deleteCard,
+    moveCard,
+    updateBoardMembers,
+  } = useApp();
 
-  const [boardTitle, setBoardTitle] = useState(board?.title || 'Untitled Board');
+  // Local board state (keeps a snapshot synced with context)
+  const [board, setBoard] = useState<BoardType | null>(null);
+
+  const [boardTitle, setBoardTitle] = useState('Untitled Board');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [selectedCard, setSelectedCard] = useState<{ card: CardType; listId: string } | null>(null);
@@ -1414,12 +1917,37 @@ const Board = () => {
   const [commentsCard, setCommentsCard] = useState<CardType | null>(null);
   const [descriptionCard, setDescriptionCard] = useState<CardType | null>(null);
   const [newListTitle, setNewListTitle] = useState('');
+  const [isAddingList, setIsAddingList] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingListTitle, setEditingListTitle] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'list' | 'card' | 'member'; id: string; listId?: string; memberEmail?: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<
+    | { type: 'list'; id: string }
+    | { type: 'card'; id: string; listId: string }
+    | { type: 'member'; memberEmail: string; id?: string }
+    | null
+  >(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [boardDeadline, setBoardDeadline] = useState<string>('');
+  const [showDeadlinePicker, setShowDeadlinePicker] = useState(false);
+  const [memberDeadlines, setMemberDeadlines] = useState<Record<string, string>>({});
 
+
+  // sync local board from context whenever boards or boardId changes
+  useEffect(() => {
+    if (!boardId) {
+      setBoard(null);
+      return;
+    }
+    const found = boards.find((b) => b.id === boardId);
+    setBoard(found ?? null);
+    if (found) {
+      setBoardTitle(found.title || 'Untitled Board');
+      setBoardDeadline((found as any).deadline || '');
+    }
+  }, [boards, boardId]);
+
+  // responsive
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -1437,73 +1965,160 @@ const Board = () => {
 
   // Handler functions
   const handleSaveTitle = useCallback(() => {
-    if (boardTitle.trim()) {
-      updateBoard(projectId!, boardId!, { title: boardTitle });
-      toast.success('✅ Board Saved');
-      setIsEditingTitle(false);
+    if (!boardId || !boardTitle.trim()) return;
+    updateBoard(boardId, { title: boardTitle });
+    toast.success('✅ Board Saved');
+    setIsEditingTitle(false);
+  }, [boardId, boardTitle, updateBoard]);
+
+const handleSaveBoardDeadline = useCallback(async () => {
+  if (!boardId) return;
+
+  // 1️⃣ Update board in local state / context
+  updateBoard(boardId, { deadline: boardDeadline } as any);
+
+  // 2️⃣ Push deadline to all member Google Calendars
+  if (board?.members?.length) {
+    try {
+      await addEventToGoogleCalendar({
+        title: `${boardTitle} Board Deadline`,
+        dueDate: boardDeadline,
+        assignedMembers: board.members.map(m => m.email),
+      });
+      toast.success('Board deadline updated and added to members’ calendars');
+    } catch (err) {
+      console.error('Failed to add board deadline to Google Calendar', err);
+      toast.error('Board deadline updated but failed to add to Google Calendar');
     }
-  }, [boardTitle, projectId, boardId, updateBoard]);
+  } else {
+    toast.success('Board deadline updated');
+  }
+
+  // 3️⃣ Close picker
+  setShowDeadlinePicker(false);
+}, [boardId, boardDeadline, updateBoard, board, boardTitle]);
+
 
   const handleAddList = useCallback(() => {
-    if (newListTitle.trim()) {
-      addList(projectId!, boardId!, newListTitle.trim());
-      setNewListTitle('');
-      toast.success('List added');
-    }
-  }, [newListTitle, projectId, boardId, addList]);
+    if (!boardId || !newListTitle.trim()) return;
+    addList(boardId, newListTitle.trim());
+    setNewListTitle('');
+    setIsAddingList(false);
+    toast.success('List added');
+  }, [boardId, newListTitle, addList]);
 
   const handleRenameList = useCallback((listId: string) => {
-    if (editingListTitle.trim()) {
-      updateList(projectId!, boardId!, listId, editingListTitle.trim());
-      setEditingListId(null);
-      setEditingListTitle('');
-      toast.success('List renamed');
-    }
-  }, [editingListTitle, projectId, boardId, updateList]);
+    if (!boardId || !editingListTitle.trim()) return;
+    updateList(boardId, listId, editingListTitle.trim());
+    setEditingListId(null);
+    setEditingListTitle('');
+    toast.success('List renamed');
+  }, [boardId, editingListTitle, updateList]);
 
-  const handleDeleteList = useCallback(() => {
-    if (deleteConfirm?.type === 'list') {
-      deleteList(projectId!, boardId!, deleteConfirm.id);
+  const handleDeleteList = useCallback(async () => {
+    if (!boardId || deleteConfirm?.type !== 'list') return;
+    try {
+      await deleteList(boardId, deleteConfirm.id);
       toast.success('List deleted');
       setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Error deleting list:', error);
+      toast.error('Failed to delete list');
+      setDeleteConfirm(null);
     }
-  }, [deleteConfirm, projectId, boardId, deleteList]);
+  }, [boardId, deleteConfirm, deleteList]);
 
   const handleAddCard = useCallback((listId: string) => {
-    const newCard: Omit<CardType, 'id'> = {
-      title: 'New Card',
+    if (!boardId) return;
+    // Create a temporary new card with empty fields
+    const tempCard: CardType = {
+      id: 'temp-new-card',
+      title: '',
       description: '',
       labels: [],
       assignedMembers: [],
       attachments: [],
       comments: [],
     };
-    addCard(projectId!, boardId!, listId, newCard);
-    toast.success('Card added');
-  }, [projectId, boardId, addCard]);
+    // Open the modal for the new card
+    setSelectedCard({ card: tempCard, listId });
+    setShowCardModal(true);
+  }, [boardId]);
 
-  const handleUpdateCard = useCallback((listId: string, cardId: string, updates: Partial<CardType>) => {
-    updateCard(projectId!, boardId!, listId, cardId, updates);
-  }, [projectId, boardId, updateCard]);
+  const handleUpdateCard = useCallback(
+    async (listId: string, cardId: string, updates: Partial<CardType>) => {
+      if (!boardId) return;
+
+      try {
+        // 🧩 Step 1: Update the card in your backend or state
+        await updateCard(boardId, listId, cardId, updates);
+
+        // 🗓️ Step 2: Sync with Google Calendar
+        const { title, description, dueDate, assignedMembers, googleEventId } = updates;
+
+        if (dueDate && assignedMembers && assignedMembers.length > 0) {
+          const parsedDate = new Date(dueDate as any);
+
+          if (googleEventId) {
+            // 🔄 Update existing calendar event
+            await updateGoogleCalendarEvent(
+              googleEventId,
+              { title: title ?? "", description, dueDate: parsedDate },
+              assignedMembers
+            );
+            toast.success("Google Calendar event updated ✅");
+          } else {
+            // ➕ Create new calendar event for all assigned members
+            const newEventId = await addEventToGoogleCalendar({
+              title: title ?? "",
+              description,
+              dueDate: parsedDate,
+              assignedMembers,
+            });
+
+            if (newEventId) {
+              await updateCard(boardId, listId, cardId, { googleEventId: newEventId });
+            }
+
+            toast.success("Task added to Google Calendar ✅");
+          }
+
+          // 🔔 Step 3: Send in-app notifications to all assigned members
+        assignedMembers.forEach((memberEmail) => {
+          sendNotification(
+            memberEmail,            // recipientEmail
+            "card_assigned",        // type
+            {
+              boardTitle: board?.title || "Untitled Board", 
+              boardId: boardId,     // optional but useful
+              cardTitle: title,            }
+          );
+        });
+        }
+      } catch (err) {
+        console.error("❌ Calendar sync failed:", err);
+        toast.error("Failed to sync with Google Calendar");
+      }
+    },
+    [boardId, board, updateCard, sendNotification]
+  )
 
   const handleDeleteCard = useCallback(() => {
-    if (deleteConfirm?.type === 'card' && deleteConfirm.listId) {
-      deleteCard(projectId!, boardId!, deleteConfirm.listId, deleteConfirm.id);
-      toast.success('Card deleted');
-      setDeleteConfirm(null);
-      setShowCardModal(false);
-      setSelectedCard(null);
-    }
-  }, [deleteConfirm, projectId, boardId, deleteCard]);
+    if (!boardId || deleteConfirm?.type !== 'card' || !deleteConfirm.listId) return;
+    deleteCard(boardId, deleteConfirm.listId, deleteConfirm.id);
+    toast.success('Card deleted');
+    setDeleteConfirm(null);
+    setShowCardModal(false);
+    setSelectedCard(null);
+  }, [boardId, deleteConfirm, deleteCard]);
 
   const handleRemoveMember = useCallback(() => {
-    if (deleteConfirm?.type === 'member' && deleteConfirm.memberEmail) {
-      const updatedMembers = board?.members.filter(member => member.email !== deleteConfirm.memberEmail) || [];
-      updateBoard(projectId!, boardId!, { members: updatedMembers });
-      toast.success('Member removed');
-      setDeleteConfirm(null);
-    }
-  }, [deleteConfirm, projectId, boardId, updateBoard, board?.members]);
+    if (!boardId || deleteConfirm?.type !== 'member' || !deleteConfirm.memberEmail) return;
+    const updatedMembers = board?.members?.filter((m) => m.email !== deleteConfirm.memberEmail) || [];
+    updateBoard(boardId, { members: updatedMembers });
+    toast.success('Member removed');
+    setDeleteConfirm(null);
+  }, [boardId, deleteConfirm, updateBoard, board?.members]);
 
   const handleViewComments = useCallback((card: CardType, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1537,7 +2152,14 @@ const Board = () => {
   }, []);
 
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
+    const { active } = event;
+    const activeId = active.id as string;
+    
+    // Store the active ID for drag overlay
+    setActiveId(activeId);
+    
+    // Log for debugging
+    console.log('🎯 Drag Start:', { activeId, active });
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -1549,20 +2171,52 @@ const Board = () => {
     const activeId = active.id as string;
     const overId = over.id as string;
 
+    console.log('🎯 Drag End:', { activeId, overId, board });
+
     if (activeId.startsWith('list-') && overId.startsWith('list-')) {
       const oldIndex = board.lists.findIndex((l) => `list-${l.id}` === activeId);
       const newIndex = board.lists.findIndex((l) => `list-${l.id}` === overId);
 
       if (oldIndex !== newIndex) {
         const newLists = arrayMove(board.lists, oldIndex, newIndex);
-        reorderLists(projectId!, boardId!, newLists);
+        reorderLists(boardId!, newLists);
       }
       return;
     }
 
     if (activeId.startsWith('card-')) {
       const cardId = activeId.replace('card-', '');
+      
+      // Find source list and validate
       const sourceList = board.lists.find((l) => l.cards.some((c) => c.id === cardId));
+      const sourceCard = sourceList?.cards.find((c) => c.id === cardId);
+
+      // ✅ FIXED: Enhanced validation with detailed logging
+      if (!sourceList || !sourceList.id) {
+        console.error('❌ Source list not found or missing ID', { 
+          cardId, 
+          sourceList,
+          allLists: board.lists.map(l => ({ id: l.id, cardCount: l.cards.length }))
+        });
+        toast.error('Unable to move card: source list not found');
+        return;
+      }
+
+      if (!sourceCard) {
+        console.error('❌ Source card not found', { cardId, sourceListId: sourceList.id });
+        toast.error('Unable to move card: card not found');
+        return;
+      }
+
+      // ✅ Check permissions: PM (board creator) can move all cards, users can only move their assigned cards
+      const isPM = board.userEmail === user?.email;
+      const isAssigned = sourceCard.assignedMembers?.includes(user?.email || '');
+      
+      // PM can move any card, regular users can only move cards assigned to them
+      if (!isPM && !isAssigned) {
+        toast.error('You can only move cards assigned to you');
+        return;
+      }
 
       let targetListId: string;
       let targetIndex: number;
@@ -1573,14 +2227,44 @@ const Board = () => {
       } else if (overId.startsWith('card-')) {
         const overCardId = overId.replace('card-', '');
         const targetList = board.lists.find((l) => l.cards.some((c) => c.id === overCardId));
-        targetListId = targetList!.id;
-        targetIndex = targetList!.cards.findIndex((c) => c.id === overCardId);
+        
+        if (!targetList || !targetList.id) {
+          console.error('❌ Target list not found or missing ID', { 
+            overCardId, 
+            targetList,
+            allLists: board.lists.map(l => ({ id: l.id, cardCount: l.cards.length }))
+          });
+          toast.error('Unable to move card: target list not found');
+          return;
+        }
+        
+        targetListId = targetList.id;
+        targetIndex = targetList.cards.findIndex((c) => c.id === overCardId);
       } else {
         return;
       }
 
-      if (sourceList && (sourceList.id !== targetListId || activeId !== overId)) {
-        moveCard(projectId!, boardId!, cardId, sourceList.id, targetListId, targetIndex);
+      // ✅ FIXED: Additional validation before calling moveCard
+      if (!targetListId) {
+        console.error('❌ Target list ID is undefined');
+        toast.error('Unable to move card: invalid target');
+        return;
+      }
+
+      // Only move if there's an actual change
+      if (sourceList.id !== targetListId || activeId !== overId) {
+        try {
+          console.log('✅ Moving card:', { 
+            cardId, 
+            sourceListId: sourceList.id, 
+            targetListId, 
+            targetIndex 
+          });
+          moveCard(boardId!, cardId, sourceList.id, targetListId, targetIndex);
+        } catch (error) {
+          console.error('❌ Failed to move card:', error);
+          toast.error('Failed to move card. Please try again.');
+        }
       }
     }
   };
@@ -1617,7 +2301,50 @@ const Board = () => {
 
   const confirmDialogProps = getConfirmDialogProps();
 
-  if (!project || !board) {
+// For a card/member deadline
+const handleMemberDeadlineChange = async (memberEmail: string, date: string) => {
+  // 1️⃣ Update local state
+  setMemberDeadlines(prev => ({ ...prev, [memberEmail]: date }));
+
+  // 2️⃣ Push to Google Calendar
+  try {
+    const eventId = await addEventToGoogleCalendar({
+      title: `Task Deadline in ${boardTitle}`,
+      dueDate: date,
+      assignedMembers: [memberEmail],
+    });
+    // Optionally save eventId for future updates
+    console.log('Event created with ID:', eventId);
+  } catch (err) {
+    console.error('Failed to add card deadline to Google Calendar', err);
+  }
+};
+
+// For the whole board
+const handleBoardDeadlineChange = async (date: string) => {
+  // 1️⃣ Update local state
+  setBoardDeadline(date);
+
+  // 2️⃣ Update board context (so it's saved in your app)
+  if (boardId) updateBoard(boardId, { deadline: date } as any);
+
+  // 3️⃣ Push to Google Calendar
+  try {
+    const eventId = await addEventToGoogleCalendar({
+      title: `${boardTitle} Board Deadline`,
+      dueDate: date,
+      assignedMembers: board?.members.map(m => m.email),
+    });
+    console.log('Board event created with ID:', eventId);
+  } catch (err) {
+    console.error('Failed to add board deadline to Google Calendar', err);
+  }
+};
+
+
+
+
+  if (!board) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 mobile-safe-padding">
         <div className="text-center glass-strong rounded-2xl p-8 max-w-md w-full mx-4 animate-slide-in">
@@ -1670,9 +2397,9 @@ const Board = () => {
                     autoFocus
                   />
                 ) : (
-                  <div className="flex items-center gap-4 min-w-0 flex-1"> {/* FIXED: Changed from gap-3 to gap-4 for better spacing */}
+                  <div className="flex items-center gap-4 min-w-0 flex-1">
                     <h1
-                      className="text-xl sm:text-2xl font-bold cursor-pointer hover:text-purple-300 transition-all py-2 px-3 rounded-lg hover:bg-white/5 smooth-transition min-w-0 flex-1 truncate"
+                      className="text-xl sm:text-2xl font-bold cursor-pointer hover:text-purple-300 transition-all py-2 px-3 rounded-lg hover:bg-white/5 smooth-transition min-w-0 truncate"
                       onClick={() => setIsEditingTitle(true)}
                       role="button"
                       tabIndex={0}
@@ -1680,10 +2407,112 @@ const Board = () => {
                     >
                       {boardTitle}
                     </h1>
-                    {/* FIXED: Added margin to create space between title and badge */}
+                    
+                    {/* Board Members Display */}
+                    <div className="flex items-center gap-2">
+                      {/* Project Manager */}
+                      {board.userEmail && (
+                        <div className="flex items-center gap-1.5 glass px-3 py-1 rounded-lg">
+                          <Avatar className="w-6 h-6">
+                            <AvatarFallback className="gradient-primary text-xs text-white">
+                              {board.userEmail[0].toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-xs text-purple-300 hidden sm:inline">PM</span>
+                        </div>
+                      )}
+                      
+                      {/* Team Members */}
+                      {board.members && board.members.length > 0 && (
+                        <div className="flex items-center gap-1.5 glass px-3 py-1 rounded-lg">
+                          <div className="flex -space-x-2">
+                            {board.members.slice(0, 3).map((member, idx) => (
+                              <Avatar key={idx} className="w-6 h-6 border-2 border-background">
+                                <AvatarFallback className="gradient-secondary text-xs text-white">
+                                  {member.email[0].toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                            ))}
+                          </div>
+                          <span className="text-xs text-purple-300 hidden sm:inline">
+                            {board.members.length} {board.members.length === 1 ? 'Member' : 'Members'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    
                     <Badge className="glass px-3 py-1 text-xs mr-2">
                       {board.lists.length} lists
                     </Badge>
+                    
+                    {/* Board Deadline Badge/Picker */}
+                    <div className="relative flex-shrink-0">
+                      {showDeadlinePicker ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="date"
+                            value={boardDeadline}
+                            onChange={async (e) => {
+                              const date = e.target.value;
+                              setBoardDeadline(date); // update local state
+
+                              if (!boardId) return;
+
+                              // 1️⃣ Update board context
+                              updateBoard(boardId, { deadline: date } as any);
+
+                              // 2️⃣ Push to Google Calendar
+                              if (board?.members?.length) {
+                                try {
+                                  await addEventToGoogleCalendar({
+                                    title: `${boardTitle} Board Deadline`,
+                                    dueDate: date,
+                                    assignedMembers: board.members.map(m => m.email),
+                                  });
+                                  toast.success('Board deadline added to members’ calendars');
+                                } catch (err) {
+                                  console.error(err);
+                                  toast.error('Failed to add board deadline to Google Calendar');
+                                }
+                              }
+                            }}
+                            className="glass h-8 text-xs w-36"
+                          />
+
+                          <Button
+                            size="sm"
+                            onClick={handleSaveBoardDeadline}
+                            className="h-8 px-3 gradient-primary"
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setShowDeadlinePicker(false);
+                              setBoardDeadline((board as any)?.deadline || '');
+                            }}
+                            className="h-8 px-3 glass"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowDeadlinePicker(true)}
+                          className="flex items-center gap-2 px-3 py-1 text-xs glass hover-glow rounded-lg smooth-transition"
+                          title={boardDeadline ? `Project deadline: ${new Date(boardDeadline).toLocaleDateString()}` : 'Set project deadline'}
+                        >
+                          <Calendar className="w-3 h-3" />
+                          {boardDeadline ? (
+                            <span>{new Date(boardDeadline).toLocaleDateString()}</span>
+                          ) : (
+                            <span className="text-purple-300">Set Deadline</span>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1741,7 +2570,7 @@ const Board = () => {
 
                   {/* Enhanced Add List Column */}
                   <div className={`flex-shrink-0 ${isMobile ? 'w-72' : 'w-80'} h-full flex flex-col`}>
-                    {newListTitle ? (
+                    {isAddingList ? (
                       <div className="glass-strong rounded-2xl p-4 h-fit animate-slide-in">
                         <Input
                           value={newListTitle}
@@ -1750,7 +2579,10 @@ const Board = () => {
                           className="glass mb-4 h-11 rounded-xl border-white/20 focus:border-purple-400 smooth-transition"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') handleAddList();
-                            if (e.key === 'Escape') setNewListTitle('');
+                            if (e.key === 'Escape') {
+                              setNewListTitle('');
+                              setIsAddingList(false);
+                            }
                           }}
                           autoFocus
                         />
@@ -1764,7 +2596,10 @@ const Board = () => {
                             Add List
                           </Button>
                           <Button 
-                            onClick={() => setNewListTitle('')} 
+                            onClick={() => {
+                              setNewListTitle('');
+                              setIsAddingList(false);
+                            }} 
                             size="sm" 
                             variant="ghost"
                             className="h-10 glass smooth-transition"
@@ -1777,7 +2612,10 @@ const Board = () => {
                       <Button
                         variant="ghost"
                         className={`w-full ${isMobile ? 'h-14' : 'h-16'} glass rounded-2xl hover-glow justify-center text-lg group smooth-transition flex-shrink-0`}
-                        onClick={() => setNewListTitle('New List')}
+                        onClick={() => {
+                          setNewListTitle('New List');
+                          setIsAddingList(true);
+                        }}
                       >
                         <Plus className="w-5 h-5 mr-3 group-hover:rotate-90 smooth-transition" />
                         <span className="hidden sm:inline">Add another list</span>
@@ -1793,8 +2631,11 @@ const Board = () => {
           {/* Mobile Menu */}
           <MobileMenu 
             onShare={() => setShowShareModal(true)}
-            onAddList={() => setNewListTitle('New List')}
-            isAddingList={!!newListTitle}
+            onAddList={() => {
+              setNewListTitle('New List');
+              setIsAddingList(true);
+            }}
+            isAddingList={isAddingList}
           />
 
           {/* Enhanced Drag Overlay */}
@@ -1813,11 +2654,15 @@ const Board = () => {
           </DragOverlay>
 
           {/* Enhanced Modals */}
-            <ShareBoardModal
+          <EnhancedShareBoardModal
             board={board}
             isOpen={showShareModal}
             onClose={() => setShowShareModal(false)}
-            onUpdateMembers={(members) => updateBoard(projectId!, boardId!, { members })}
+            onUpdateMembers={(members) => updateBoardMembers(boardId!, members)}
+            onRemoveMember={(memberEmail) => {
+              const updatedMembers = board?.members?.filter((m) => m.email !== memberEmail) || [];
+              updateBoardMembers(boardId!, updatedMembers);
+            }}
           />
 
           {selectedCard && (
@@ -1828,9 +2673,45 @@ const Board = () => {
                 setShowCardModal(false);
                 setSelectedCard(null);
               }}
-              onSave={(updates) => handleUpdateCard(selectedCard.listId, selectedCard.card.id, updates)}
-              onDelete={() => setDeleteConfirm({ type: 'card', id: selectedCard.card.id, listId: selectedCard.listId })}
+              onSave={(updates) => {
+                if (selectedCard.card.id === 'temp-new-card') {
+                  // Creating a new card
+                  const newCard: Omit<CardType, 'id'> = {
+                    title: updates.title || 'Untitled Card',
+                    description: updates.description || '',
+                    labels: updates.labels || [],
+                    assignedMembers: updates.assignedMembers || [],
+                    attachments: updates.attachments || [],
+                    comments: updates.comments || [],
+                  };
+                  addCard(boardId!, selectedCard.listId, newCard);
+                  toast.success('Card created');
+                } else {
+                  // Updating existing card
+                  handleUpdateCard(selectedCard.listId, selectedCard.card.id, updates);
+                }
+              }}
+              onDelete={() => {
+                if (selectedCard.card.id !== 'temp-new-card') {
+                  setDeleteConfirm({ type: 'card', id: selectedCard.card.id, listId: selectedCard.listId });
+                }
+              }}
               boardMembers={board.members}
+              lists={board.lists}
+              currentListId={selectedCard.listId}
+              onMoveCard={(targetListId) => {
+                if (selectedCard.card.id !== 'temp-new-card') {
+                  // Find the current list to get the card index
+                  const sourceList = board.lists.find(l => l.id === selectedCard.listId);
+                  const cardIndex = sourceList?.cards.findIndex(c => c.id === selectedCard.card.id) || 0;
+                  
+                  // Move the card
+                  moveCard(boardId!, selectedCard.card.id, selectedCard.listId, targetListId, 0);
+                  
+                  // Update the selected card's listId
+                  setSelectedCard({ ...selectedCard, listId: targetListId });
+                }
+              }}
             />
           )}
 

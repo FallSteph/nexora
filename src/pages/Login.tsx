@@ -34,9 +34,13 @@ const Login = () => {
             body: JSON.stringify({ token: response.access_token }),
           });
 
-          if (!res.ok) throw new Error('Failed to log in with Google');
+          const data = await res.json();
 
-          const data = await res.json(); // { user }
+          if (!res.ok) {
+            // Handle specific backend error message (e.g., no account found)
+            toast.error(data.message || 'Failed to log in with Google');
+            return;
+          }
 
           googleLogin(data.user);
           toast.success('Welcome back! 🚀');
@@ -51,29 +55,31 @@ const Login = () => {
   };
 
   // Manual login
-const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  const recaptchaToken = recaptchaRef.current?.getValue();
-  if (!recaptchaToken) {
-    toast.error('Please verify reCAPTCHA');
-    return;
-  }
+    const recaptchaToken = recaptchaRef.current?.getValue();
+    if (!recaptchaToken) {
+      toast.error('Please verify reCAPTCHA');
+      return;
+    }
 
-  setLoading(true);
+    setLoading(true);
   try {
-    await login(email, password, recaptchaToken); // calls AuthContext login internally
+    await login(email, password, recaptchaToken);
     toast.success('Welcome back!');
     navigate('/dashboard');
   } catch (err: any) {
-    toast.error(err.message || 'Login failed');
+    if (err.message === "GOOGLE_ACCOUNT") {
+      toast.error("This account was created with Google. Please sign in using Google.");
+    } else {
+      toast.error(err.message || 'Login failed');
+    }
   } finally {
     setLoading(false);
     recaptchaRef.current?.reset();
   }
 };
-
-
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
@@ -193,13 +199,6 @@ const handleLogin = async (e: React.FormEvent) => {
               Sign up
             </Link>
           </p>
-
-          {/* Testing Hint */}
-          <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-            <p className="text-xs text-center text-muted-foreground">
-              💡 Test with: admin@nexora.io / admin123
-            </p>
-          </div>
         </div>
       </div>
     </div>

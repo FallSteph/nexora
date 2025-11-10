@@ -21,6 +21,18 @@ const Signup = () => {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Strong password validation
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+
+    if (!passwordRegex.test(password)) {
+      toast.error(
+        "Password must be at least 8 characters long, include 1 uppercase, 1 lowercase, 1 number, and 1 special character."
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/signup`, {
@@ -41,7 +53,6 @@ const Signup = () => {
     }
   };
 
-
   const handleGoogleSignup = () => {
     if (!(window as any).google || !(window as any).google.accounts) return;
 
@@ -50,17 +61,17 @@ const Signup = () => {
       scope: 'email profile',
       callback: async (response: any) => {
         try {
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google`, {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/google-signup`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: response.access_token }),
           });
 
-          if (!res.ok) throw new Error('Failed to sign up with Google');
+          const data = await res.json();
 
-          const data = await res.json(); // { user }
+          if (!res.ok) throw new Error(data.message || 'Failed to sign up with Google');
 
-          googleSignup(data.user); // ✅ call googleSignup
+          googleSignup(data.user);
           toast.success('Account created! 🎉');
           navigate('/dashboard');
         } catch (err: any) {
@@ -71,7 +82,6 @@ const Signup = () => {
 
     client.requestAccessToken();
   };
-
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
@@ -165,7 +175,7 @@ const Signup = () => {
                   )}
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground">Must be at least 6 characters</p>
+              <p className="text-xs text-muted-foreground">Must be at least 8 characters long, include 1 uppercase, 1 lowercase, 1 number, and 1 special character.</p>
             </div>
 
             <Button

@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,6 +36,7 @@ type SortField = 'name' | 'email' | 'role';
 type SortDirection = 'asc' | 'desc';
 
 const Users = () => {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserType[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -107,38 +110,58 @@ const filteredUsers = users.filter((user) => {
     setMobileSortOpen(false);
   };
 
-  const generateRandomPassword = (length = 10) => {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-  let password = "";
-  for (let i = 0; i < length; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
+const generateRandomPassword = (length = 10) => {
+  if (length < 8) length = 8; // enforce minimum length
+
+  const upperCase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const lowerCase = "abcdefghijklmnopqrstuvwxyz";
+  const numbers = "0123456789";
+  const specialChars = "!@#$%^&*()_+[]{}|;:,.<>?";
+
+  // Ensure at least one of each type
+  let password = '';
+  password += upperCase[Math.floor(Math.random() * upperCase.length)];
+  password += lowerCase[Math.floor(Math.random() * lowerCase.length)];
+  password += numbers[Math.floor(Math.random() * numbers.length)];
+  password += specialChars[Math.floor(Math.random() * specialChars.length)];
+
+  const allChars = upperCase + lowerCase + numbers + specialChars;
+  for (let i = password.length; i < length; i++) {
+    password += allChars.charAt(Math.floor(Math.random() * allChars.length));
   }
+
+  // Shuffle the password so the first 4 chars aren't predictable
+  password = password.split('').sort(() => Math.random() - 0.5).join('');
+
   return password;
 };
 
 
+
  const handleOpenDialog = (user?: UserType) => {
   if (user) {
+    // Editing existing user
     setEditingUser(user);
     setFormData({
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
       password: '', // not shown for editing
       role: user.role,
     });
+    setDialogOpen(true);
   } else {
+    // Creating new user - form reset handled in onOpenChange
     setEditingUser(null);
     setFormData({
       firstName: '',
       lastName: '',
       email: '',
-      password: generateRandomPassword(), // ✅ auto-generate password
+      password: generateRandomPassword(),
       role: 'user',
     });
+    setDialogOpen(true);
   }
-  setDialogOpen(true);
 };
 
 
@@ -174,19 +197,59 @@ const filteredUsers = users.filter((user) => {
     }
 
     const savedUser = await res.json();
+    const u = savedUser.user || savedUser;
 
-    if (editingUser) {
-      // Update existing user in state
-      setUsers(users.map((u) => (u.id === editingUser.id ? savedUser : u)));
-      toast.success("User updated successfully! ✨");
-    } else {
-      // Add newly created user
-      setUsers([...users, savedUser]);
-      toast.success("User added successfully! 🎉");
-    }
+    // Normalize user data (backend returns _id, frontend uses id)
+   const normalizedUser = {
+  id: u._id,
+  firstName: u.firstName || '',
+  lastName: u.lastName || '',
+  email: u.email || '',
+  role: u.role || 'user',
+};
 
+
+if (!editingUser) {
+   setUsers(prev => [...prev, normalizedUser]);
+
+  toast.success(`User ${normalizedUser.firstName} ${normalizedUser.lastName} created successfully`);
+
+  // Add welcome notification for the new user
+  await addNotification({
+    userEmail: normalizedUser.email,
+    message: `Welcome to Nexora! 🎉 Your account has been created.`,
+    type: 'welcome',
+    read: false,
+  });
+
+  // Notify all admins about the new u  ser
+  const adminNotifications = users
+    .filter(u => u.role === 'admin')
+    .map(admin =>
+      addNotification({
+        userEmail: admin.email,
+        message: `New user ${normalizedUser.firstName} ${normalizedUser.lastName} (${normalizedUser.email}) has joined.`,
+        type: 'new_signup',
+        read: false,
+      })
+    );
+
+  await Promise.all(adminNotifications);
+}
+
+
+
+    // Close dialog and reset form
     setDialogOpen(false);
-  } catch (error) {
+    setEditingUser(null);
+    setFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      password: '',
+      role: 'user',
+    });
+  } catch (error: any) {
     console.error("Error saving user:", error);
     toast.error(error.message || "Failed to save user");
   }
@@ -231,9 +294,27 @@ const handleConfirmDelete = async () => {
     setUserToDelete(null);
   };
 
-  const handleChangeRole = (id: string, newRole: 'admin' | 'user') => {
-    setUsers(users.map((u) => (u.id === id ? { ...u, role: newRole } : u)));
-    toast.success(`Role changed to ${newRole}`);
+  const handleChangeRole = async (id: string, newRole: 'admin' | 'user') => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/users/${id}/role`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+
+      if (!res.ok) throw new Error("Failed to update role");
+
+      // Update UI immediately
+      setUsers(prev =>
+        prev.map(user =>
+          user.id === id ? { ...user, role: newRole } : user
+        )
+      );
+
+      toast.success(`Role updated to ${newRole}`);
+    } catch (err) {
+      toast.error("Failed to update role");
+    }
   };
 
   const getSortIcon = (field: SortField) => {
@@ -270,6 +351,28 @@ useEffect(() => {
   fetchUsers();
 }, []);
 
+const addNotification = async (notification: {
+  userEmail: string;
+  message: string;
+  type: string;
+  read: boolean;
+}) => {
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/api/notifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(notification),
+    });
+
+    if (!res.ok) throw new Error('Failed to save notification');
+
+    const savedNotification = await res.json();
+    return savedNotification;
+  } catch (err) {
+    console.error('Error adding notification:', err);
+    return null;
+  }
+};
 
 
   return (
@@ -285,11 +388,35 @@ useEffect(() => {
           </p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog 
+          open={dialogOpen} 
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) {
+              // Reset form when closing
+              setFormData({
+                firstName: '',
+                lastName: '',
+                email: '',
+                password: '',
+                role: 'user',
+              });
+              setEditingUser(null);
+            } else if (!editingUser) {
+              // When opening for new user, generate password
+              setFormData({
+                firstName: '',
+                lastName: '',
+                email: '',
+                password: generateRandomPassword(),
+                role: 'user',
+              });
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button 
               className="gradient-primary hover-glow w-full sm:w-auto mt-2 sm:mt-0"
-              onClick={() => handleOpenDialog()}
               size="sm"
             >
               <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />

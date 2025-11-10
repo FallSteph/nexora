@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -15,13 +15,17 @@ import { Bell, BellOff, Trash2, CheckCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Notifications = () => {
-  const { notifications, markNotificationRead, deleteNotification, clearAllNotifications } = useApp();
+  const { notifications, markNotificationRead, deleteNotification, clearAllNotifications, fetchNotifications } = useApp();
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>('');
 
-  const handleMarkRead = (id: string) => {
-    markNotificationRead(id);
-    toast.success('Marked as read');
+  const handleMarkRead = async (id: string) => {
+    const notificationId = id || (notifications.find(n => n._id === id)?._id);
+    if (notificationId) {
+      await markNotificationRead(notificationId);
+      toast.success('Marked as read');
+    }
   };
 
   const handleClearAll = () => {
@@ -30,10 +34,13 @@ const Notifications = () => {
     setClearAllConfirm(false);
   };
 
-  const handleDelete = (id: string) => {
-    deleteNotification(id);
-    toast.success('Notification deleted');
-    setDeleteConfirm(null);
+  const handleDelete = async (id: string) => {
+    const notificationId = id || (notifications.find(n => n._id === id)?._id);
+    if (notificationId) {
+      await deleteNotification(notificationId);
+      toast.success('Notification deleted');
+      setDeleteConfirm(null);
+    }
   };
 
   const handleDeleteClick = (id: string) => {
@@ -41,6 +48,19 @@ const Notifications = () => {
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  useEffect(() => {
+    const email = localStorage.getItem('userEmail');
+    if (email) {
+      setUserEmail(email);
+      fetchNotifications(email);
+
+      // ✅ Auto-refresh every 10s
+      const interval = setInterval(() => fetchNotifications(email), 10000);
+      return () => clearInterval(interval);
+    }
+  }, []);
+
 
   return (
     <div className="min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 sm:space-y-6 md:space-y-8">
@@ -107,7 +127,7 @@ const Notifications = () => {
         ) : (
           notifications.map((notification) => (
             <Card
-              key={notification.id}
+              key={notification.id || notification._id}
               className={`glass-strong p-3 sm:p-4 md:p-6 transition-all duration-200 ${
                 !notification.read 
                   ? 'border-l-2 sm:border-l-4 border-l-primary hover-glow shadow-sm hover:shadow-md' 
@@ -134,8 +154,24 @@ const Notifications = () => {
                     }`}>
                       {notification.message}
                     </p>
+                     {notification.type === 'board_added' && notification.boardId && (
+                      <a
+                        href={`/board/${notification.boardId}`}
+                        className="text-xs xs:text-sm text-primary hover:underline font-medium inline-block mt-1"
+                      >
+                        Go to Board →
+                      </a>
+                    )}
+                    {notification.type === 'board_created' && notification.boardId && (
+                      <a
+                        href={`/board/${notification.boardId}`}
+                        className="text-xs xs:text-sm text-primary hover:underline font-medium inline-block mt-1"
+                      >
+                        View Board →
+                      </a>
+                    )}
                     <p className="text-[10px] xs:text-xs sm:text-sm text-muted-foreground">
-                      {notification.timestamp.toLocaleString()}
+                      {new Date(notification.createdAt).toLocaleString()}
                     </p>
                   </div>
                 </div>
@@ -147,7 +183,7 @@ const Notifications = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleMarkRead(notification.id)}
+                        onClick={() => handleMarkRead(notification.id || notification._id || '')}
                         className="hidden xs:inline-flex items-center h-7 sm:h-8 px-2 text-xs"
                       >
                         <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
@@ -158,7 +194,7 @@ const Notifications = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleMarkRead(notification.id)}
+                        onClick={() => handleMarkRead(notification.id || notification._id || '')}
                         className="xs:hidden h-7 w-7 p-0 flex-shrink-0"
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
@@ -170,7 +206,7 @@ const Notifications = () => {
                     variant="ghost"
                     size="sm"
                     className="text-destructive hover:text-destructive h-7 w-7 sm:h-8 sm:w-8 p-0 flex-shrink-0"
-                    onClick={() => handleDeleteClick(notification.id)}
+                    onClick={() => handleDeleteClick(notification.id || notification._id || '')}
                   >
                     <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </Button>
