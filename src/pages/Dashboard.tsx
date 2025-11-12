@@ -102,8 +102,8 @@ const handleGeneratePDF = () => {
         // Fetch all boards for admin, or boards where user is creator/member
         const res = await fetch(
           user.role === "admin"
-            ? "http://localhost:5000/api/boards?deleted=false"
-            : `http://localhost:5000/api/boards?userEmail=${user.email}&includeMembers=true&deleted=false`
+            ? "https://backend-687v.onrender.com/api/boards?deleted=false"
+            : `https://backend-687v.onrender.com/api/boards?userEmail=${user.email}&includeMembers=true&deleted=false`
         );
         if (!res.ok) throw new Error("Failed to load boards");
         const data = await res.json();
@@ -136,8 +136,8 @@ const handleGeneratePDF = () => {
       try {
         const res = await fetch(
           user.role === "admin"
-            ? "http://localhost:5000/api/boards?deleted=true"
-            : `http://localhost:5000/api/boards?userEmail=${user.email}&includeMembers=true&deleted=true`
+            ? "https://backend-687v.onrender.com/api/boards?deleted=true"
+            : `https://backend-687v.onrender.com/api/boards?userEmail=${user.email}&includeMembers=true&deleted=true`
         );
         if (!res.ok) return;
         const data = await res.json();
@@ -169,7 +169,7 @@ const handleGeneratePDF = () => {
     if (!newBoardTitle.trim()) return toast.error("Board title is required");
 
     try {
-      const res = await fetch("http://localhost:5000/api/boards", {
+      const res = await fetch("https://backend-687v.onrender.com/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -214,7 +214,7 @@ const handleUpdateBoard = async () => {
   if (!newBoardTitle.trim()) return toast.error("Title is required");
 
   try {
-    const res = await fetch(`http://localhost:5000/api/boards/${editingBoard.id}`, {
+    const res = await fetch(`https://backend-687v.onrender.com/api/boards/${editingBoard.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -252,7 +252,7 @@ const handleUpdateBoard = async () => {
     if (!boardToDelete) return;
     try {
       // Soft delete on backend
-      const res = await fetch(`http://localhost:5000/api/boards/${boardToDelete}`, {
+      const res = await fetch(`https://backend-687v.onrender.com/api/boards/${boardToDelete}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete board");
@@ -279,7 +279,7 @@ const handleUpdateBoard = async () => {
   const handleRestoreBoard = async (board: Board) => {
     try {
       // Restore the board in the database
-      const res = await fetch(`http://localhost:5000/api/boards/${board.id}`, {
+      const res = await fetch(`https://backend-687v.onrender.com/api/boards/${board.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deleted: false, deletedAt: null }),
@@ -324,7 +324,7 @@ const handleUpdateBoard = async () => {
     if (!boardToPermanentDelete) return;
 
     try {
-      const res = await fetch(`http://localhost:5000/api/boards/permanent/${boardToPermanentDelete}`, {
+      const res = await fetch(`https://backend-687v.onrender.com/api/boards/permanent/${boardToPermanentDelete}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to permanently delete board");
@@ -373,7 +373,7 @@ const analytics = {
 useEffect(() => {
     const loadUsers = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/users");
+        const res = await fetch("https://backend-687v.onrender.com/api/users");
         if (!res.ok) throw new Error("Failed to load users");
         const data = await res.json();
         setTotalUsers(data.length);
