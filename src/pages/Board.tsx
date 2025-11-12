@@ -58,7 +58,7 @@ const sendNotification = async (
     }
 
     await axios.post(
-      'http://localhost:5000/api/notifications',
+      'https://backend-687v.onrender.com/api/notifications',
       {
         userEmail: recipientEmail, // matches schema
         type,
@@ -534,7 +534,7 @@ const EnhancedShareBoardModal = ({
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/users');
+        const res = await fetch('https://backend-687v.onrender.com/api/users');
         if (!res.ok) throw new Error('Failed to fetch users');
         const data = await res.json();
         setAllUsers(data);
