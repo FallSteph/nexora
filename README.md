@@ -1,15 +1,29 @@
-Nexora
+Nexora.fin2
 
 A full-stack web application built with React (Vite) for the frontend and Node.js (Express + MongoDB) for the backend, using TypeScript, TailwindCSS, and several UI libraries.
 
+Table of Contents
+
 Project Structure
-nexora/
+
+Frontend
+
+Backend
+
+Setup & Installation
+
+Scripts
+
+Dependencies
+
+Project Structure
+nexora.fin2/
 │
-├─ BackEnd/       # Node.js + Express backend
+├─ backend/       # Node.js + Express backend
 │   ├─ server.js
 │   └─ package.json
 │
-├─ FrontEnd/      # React + Vite frontend
+├─ frontend/      # React + Vite frontend
 │   ├─ src/
 │   └─ package.json
 │
@@ -46,14 +60,20 @@ npm run build
 npm run lint
 
 Backend
-    The backend is built with Node.js (v22+) and Express 5, connected to MongoDB via Mongoose.
+
+The backend is built with Node.js (v22+) and Express 5, connected to MongoDB via Mongoose.
 
 Main Features
-    REST API endpoints for authentication, user management, and modules
-    JWT authentication (jsonwebtoken)
-    File uploads (multer)
-    Email notifications (nodemailer)
-    CORS enabled for frontend integration
+
+REST API endpoints for authentication, user management, and modules
+
+JWT authentication (jsonwebtoken)
+
+File uploads (multer)
+
+Email notifications (nodemailer)
+
+CORS enabled for frontend integration
 
 Key Commands
 # Install backend dependencies
@@ -71,41 +91,50 @@ Setup & Installation
 Clone the repository:
 
 git clone <repo-url>
-cd nexora
+cd nexora.fin2
 
 
 Install frontend dependencies:
 
-cd FrontEnd
+cd frontend
 npm install
 
 
 Install backend dependencies:
 
-cd ../BackEnd
+cd ../backend
 npm install
 
 
 Start the development environment:
 
-cd ../FrontEnd
+cd ../frontend
 npm start
 
 
-The frontend will run at http://localhost:8080/ and the backend at its configured port 5000.
+The frontend will run at http://localhost:8080/ and the backend at its configured port (default 3000 or specified in server.js).
 
 Dependencies Overview
-    Frontend Dependencies
-        UI & Components: @radix-ui/react-*, lucide-react, cmdk, sonner
-        State & Data: @tanstack/react-query, react-hook-form, zod
-        Utilities: axios, bcryptjs, date-fns, jsbarcode, jspdf, embla-carousel-react
-        Routing & Themes: react-router-dom, next-themes
-    
-    Backend Dependencies
-        Server & Middleware: express, cors, dotenv, bcrypt, jsonwebtoken, multer, node-fetch
-        Database: mongoose
-        Utilities: nodemailer, crypto, date-fns
-        Frontend Shared Packages: react, react-dom, tailwindcss, etc.
-    
-    Dev Dependencies (both)
-        eslint, @types/*, typescript, vite, nodemon, postcss, tailwindcss
+Frontend Dependencies
+
+UI & Components: @radix-ui/react-*, lucide-react, cmdk, sonner
+
+State & Data: @tanstack/react-query, react-hook-form, zod
+
+Utilities: axios, bcryptjs, date-fns, jsbarcode, jspdf, embla-carousel-react
+
+Routing & Themes: react-router-dom, next-themes
+
+Backend Dependencies
+
+Server & Middleware: express, cors, dotenv, bcrypt, jsonwebtoken, multer, node-fetch
+
+Database: mongoose
+
+Utilities: nodemailer, crypto, date-fns
+
+Frontend Shared Packages: react, react-dom, tailwindcss, etc.
+
+Dev Dependencies (both)
+
+eslint, @types/*, typescript, vite, nodemon, postcss, tailwindcss
